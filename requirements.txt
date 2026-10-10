@@ -1,0 +1,19 @@
+# 主应用（app/ + web/ + cli + server）零第三方依赖，只用 Python 标准库。
+# 也就是说：不装任何东西，python run_server.py 就能跑起来。
+#
+# 下面这些是"可选能力"，按需要安装，不装不影响主应用启动。
+
+# ---- 目标检测：本机推理（会自动带上 torch）----
+ultralytics>=8.3.0
+opencv-python>=4.10.0        # yolo/realtime.py 的实时窗口
+onnxruntime-gpu>=1.18.0      # 想用 ONNX 模型推理时再装
+
+# ---- 大模型：如果用 Ollama / LM Studio，请装它们的客户端，不需要 pip ----
+# Ollama     : https://ollama.com/download                  （推荐，命令行最省事）
+# LM Studio  : https://lmstudio.ai                          （图形界面，带本地服务器）
+# llama.cpp  : https://github.com/ggml-org/llama.cpp        （自己编译，最轻量）
+#
+# 如果要在 Python 里直接加载 HuggingFace 权重：
+# transformers>=4.45.0
+# accelerate>=1.0.0
+# bitsandbytes>=0.44.0      # 4bit 量化，8G 显存跑 3B/7B 时很有用
