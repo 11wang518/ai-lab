@@ -1,0 +1,20 @@
+# YOLO 数据集配置示例（复制成自己的 data.yaml 后修改路径）
+#
+# 目录结构建议：
+#   datasets/mydata/
+#     images/train/*.jpg
+#     images/val/*.jpg
+#     labels/train/*.txt
+#     labels/val/*.txt
+# 每个 txt 一行一个目标：class_id cx cy w h（都归一化到 0~1）
+
+path: ../datasets/mydata
+train: images/train
+val: images/val
+
+# 类别数量与名称，顺序必须和标注里的 class_id 一致
+nc: 3
+names:
+  0: car
+  1: person
+  2: bus
