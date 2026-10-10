@@ -1,0 +1,11 @@
+# 统一按 LF 存储，避免 Windows / Linux 协作者之间出现整文件换行差异。
+* text=auto eol=lf
+
+# 二进制资源不做换行转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.pt  binary
+*.onnx binary
