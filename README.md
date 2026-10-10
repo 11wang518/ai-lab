@@ -164,10 +164,11 @@ python yolo\realtime.py --weights yolo11n.pt --source 0 --imgsz 480 --half
 **方式一：本机进程内推理**
 
 ```powershell
-python run_server.py --vision-backend ultralytics --version-weights yolo11n.pt
+$env:AILAB_YOLO_WEIGHTS="runs\train\exp\weights\best.pt"
+python run_server.py --vision-backend ultralytics
 ```
 
-（等价的环境变量写法：`$env:AILAB_YOLO_WEIGHTS="runs\train\exp\weights\best.pt"`）
+不设 `AILAB_YOLO_WEIGHTS` 时会用默认的 `yolo11n.pt`。
 
 启动后打开网页的"目标检测"面板，上传图片即可看到画框结果。
 
@@ -273,7 +274,29 @@ ai-lab/
 
 ---
 
-## 八、自测
+## 八、版本控制与提交规范
+
+仓库已经初始化好（`main` 分支），关键文件：
+
+- `.gitignore`：排除 `runs/`、`datasets/`、`*.pt`、`*.onnx` 等训练产物和大文件；
+- `.gitattributes`：统一按 LF 存储，避免跨系统换行差异。
+
+提交信息用 [Conventional Commits](https://www.conventionalcommits.org/) 前缀 + 中文描述，
+例如 `feat(llm): 实现大模型接入层与命令行客户端`。前缀含义：
+
+| 前缀 | 用在什么地方 |
+| --- | --- |
+| `feat` | 新增功能 |
+| `fix` | 修 bug |
+| `docs` | 只改文档 |
+| `test` | 只改测试 |
+| `chore` | 构建、配置、依赖等杂项 |
+
+推送到 GitHub 的完整步骤见 [Git 与 GitHub 操作指南](docs/Git与GitHub操作指南.md)。
+
+---
+
+## 九、自测
 
 ```powershell
 python tools\smoke_test.py
@@ -284,7 +307,7 @@ python tools\smoke_test.py
 
 ---
 
-## 九、常见问题
+## 十、常见问题
 
 **端口被占用？**
 `run_server.py` 会自动往后找可用端口，启动日志里有实际地址。想固定端口就用 `--port`。
