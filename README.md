@@ -23,7 +23,7 @@
 | 3. 以 API 形式接入应用 | `app/server/http_app.py`：`POST /api/chat`（SSE 流式）、`POST /api/detect`，全部 HTTP + JSON |
 | 4. 应用形式 | CLI（`run_cli.py`）、Web（`web/`）、桌面（`desktop/`，Edge 应用模式 + Electron 两种） |
 | 二 1. 完成一次 Ultralytics 训练 | **已跑通两轮**：合成数据从零训练（mAP50 0.995）+ 真实 COCO8 微调（mAP50 0.872），均在 RTX 4060 上完成，详见 [YOLO 训练记录](docs/YOLO训练记录.md) |
-| 二 2. 实时推理部署 | **已实测**：`yolo/realtime.py` 在 RTX 4060 上跑真实照片视频达 **49.5 FPS**（单帧 18.4 ms）；`yolo/serve.py` 独立推理服务的 `/health` 与 `/predict` 均验证通过；另有 `infer.py`（图片/目录/视频）和 `export.py`（导出 ONNX/TensorRT） |
+| 二 2. 实时推理部署 | **已实测**：命令行版 `yolo/realtime.py` 达 **49.5 FPS**（单帧 18.4 ms）；**网页端也支持摄像头实时检测**（页面上点"摄像头实时"，接口往返 17.8 ms）；`yolo/serve.py` 独立推理服务的 `/health` 与 `/predict` 均验证通过 |
 | 二 3. 接入应用 | **已接通**：应用加载**自己微调的模型**，真实街景照片上识别出 3 辆车、1 辆电动车、2 个行人 |
 
 ---
@@ -192,6 +192,16 @@ python yolo\serve.py --weights runs\train\coco8-ft\weights\best.pt --port 8600 -
 ```
 
 有摄像头和屏幕时去掉 `--no-show`，就是带窗口的版本，按 `q` 退出。
+
+**网页端实时检测**（演示最方便，不用开终端）：打开 <http://127.0.0.1:8000/>，
+点"摄像头实时"；或者直接用 <http://127.0.0.1:8000/?camera=1> 一步进入。
+页面会实时显示帧率和识别到的目标数。
+
+想压测接口性能可以跑：
+
+```powershell
+python tools\bench_detect.py --frames 60      # 实测平均往返 17.8 ms
+```
 
 ### 1. 装依赖
 
