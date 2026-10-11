@@ -10,6 +10,7 @@
 - [工程日志](docs/开发日志.md)：每天做了什么、卡在哪、下一步
 - [模型部署与显存规划](docs/模型部署与显存规划.md)：8G 显存怎么选模型、怎么调参
 - [专有名词解释](docs/名词解释.md)：大模型、YOLO、工程术语的大白话对照表
+- [YOLO 训练记录](docs/YOLO训练记录.md)：数据集、参数、指标、局限，以及复现命令
 
 ---
 
@@ -21,9 +22,9 @@
 | 2. 搭建智能体（Dify / n8n / 扣子等） | `app/agent/` 自带轻量智能体（意图识别 → 工具执行 → 交回模型），同时支持把 Dify / 扣子的 OpenAI 兼容地址当作模型后端接入 |
 | 3. 以 API 形式接入应用 | `app/server/http_app.py`：`POST /api/chat`（SSE 流式）、`POST /api/detect`，全部 HTTP + JSON |
 | 4. 应用形式 | CLI（`run_cli.py`）、Web（`web/`）、桌面（`desktop/`，Edge 应用模式 + Electron 两种） |
-| 二 1. 完成一次 Ultralytics 训练 | `yolo/train.py`，默认参数按 8G 显存给（yolo11n + 640 + batch 8 + AMP） |
+| 二 1. 完成一次 Ultralytics 训练 | **已跑通**：YOLO11n，100 epochs，自建 75 张数据集，mAP50 **0.995**，详见 [YOLO 训练记录](docs/YOLO训练记录.md) |
 | 二 2. 实时推理部署 | `yolo/infer.py`（图片/目录/视频）、`yolo/realtime.py`（摄像头 + FPS）、`yolo/export.py`（导出 ONNX/TensorRT）、`yolo/serve.py`（独立推理服务） |
-| 二 3. 接入应用 | Web 端上传图片 → 后端推理 → 前端 canvas 画框；桌面端复用同一个页面 |
+| 二 3. 接入应用 | **已接通**：Web 端上传图片 → ultralytics 推理 → 前端 canvas 画框；项目自带示例图上 4 个目标全部命中 |
 
 ---
 
@@ -121,6 +122,35 @@ python run_server.py
 ---
 
 ## 四、跑通 YOLO
+
+### 本机已完成的一次训练
+
+| 项目 | 结果 |
+| --- | --- |
+| 模型 | YOLO11n（2,590,230 参数，6.5 GFLOPs） |
+| 数据集 | 75 张合成图（60 训练 / 15 验证），2 类：car / person |
+| 训练 | 100 epochs，imgsz 320，batch 8，CPU，约 5.2 分钟 |
+| 验证集 | mAP50 **0.995**，mAP50-95 **0.860** |
+| 推理 | 8.5 ms / 张（CPU） |
+
+数据集是脚本生成的（这台机器访问不了 GitHub，拿不到 coco8 和预训练权重），
+标注格式与真实数据集完全一致，换成自己的数据只需改 `data.yaml` 的路径。
+完整记录见 [YOLO 训练记录](docs/YOLO训练记录.md)。
+
+```powershell
+python tools\check_gpu.py                     # 1. 先看显卡环境
+python tools\make_synthetic_dataset.py        # 2. 生成合成数据集
+python yolo\train.py --data datasets\synthetic\data.yaml --model yolo11n.yaml ^
+  --epochs 100 --imgsz 320 --batch 8 --device cpu    # 3. 训练
+```
+
+训练完把权重接进应用：
+
+```powershell
+python tools\start_background.py --provider ollama --model qwen2.5:1.5b ^
+  --vision-backend ultralytics ^
+  --vision-weights runs\train\synthetic-cpu\weights\best.pt --vision-conf 0.45
+```
 
 ### 1. 装依赖
 
