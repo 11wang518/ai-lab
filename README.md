@@ -23,7 +23,7 @@
 | 3. 以 API 形式接入应用 | `app/server/http_app.py`：`POST /api/chat`（SSE 流式）、`POST /api/detect`，全部 HTTP + JSON |
 | 4. 应用形式 | CLI（`run_cli.py`）、Web（`web/`）、桌面（`desktop/`，Edge 应用模式 + Electron 两种） |
 | 二 1. 完成一次 Ultralytics 训练 | **已跑通两轮**：合成数据从零训练（mAP50 0.995）+ 真实 COCO8 微调（mAP50 0.872），均在 RTX 4060 上完成，详见 [YOLO 训练记录](docs/YOLO训练记录.md) |
-| 二 2. 实时推理部署 | `yolo/infer.py`（图片/目录/视频）、`yolo/realtime.py`（摄像头 + FPS）、`yolo/export.py`（导出 ONNX/TensorRT）、`yolo/serve.py`（独立推理服务） |
+| 二 2. 实时推理部署 | **已实测**：`yolo/realtime.py` 在 RTX 4060 上跑真实照片视频达 **49.5 FPS**（单帧 18.4 ms）；`yolo/serve.py` 独立推理服务的 `/health` 与 `/predict` 均验证通过；另有 `infer.py`（图片/目录/视频）和 `export.py`（导出 ONNX/TensorRT） |
 | 二 3. 接入应用 | **已接通**：应用加载**自己微调的模型**，真实街景照片上识别出 3 辆车、1 辆电动车、2 个行人 |
 
 ---
@@ -175,6 +175,23 @@ python tools\start_background.py --provider ollama --model qwen2.5:1.5b ^
 效果见 [docs/images/screenshot-yolo-real.png](docs/images/screenshot-yolo-real.png)。
 三个权重的分工：`coco8-ft`（真实数据微调，应用默认）、`yolo11n.pt`（预训练起点）、
 `synthetic-gpu`（合成数据从零训练，只用于验证训练流程）。
+
+### 实时推理与独立推理服务（已实测）
+
+没有摄像头也能验证——先用工具把几张真实照片拼成测试视频：
+
+```powershell
+python tools\make_test_video.py       # 生成 runs\test-realtime.mp4（160 帧）
+
+# 实时推理基准：49.5 FPS，单帧 18.4 ms（RTX 4060）
+python yolo\realtime.py --weights runs\train\coco8-ft\weights\best.pt ^
+  --source runs\test-realtime.mp4 --no-show --max-frames 160 --device 0
+
+# 独立推理服务（推理与应用解耦部署）
+python yolo\serve.py --weights runs\train\coco8-ft\weights\best.pt --port 8600 --device 0
+```
+
+有摄像头和屏幕时去掉 `--no-show`，就是带窗口的版本，按 `q` 退出。
 
 ### 1. 装依赖
 

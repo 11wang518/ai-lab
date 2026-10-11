@@ -316,7 +316,53 @@ python tools\start_background.py --provider ollama --model qwen2.5:1.5b ^
 
 ---
 
-## 八、局限（必须说清楚）
+## 八、实时推理与独立推理服务
+
+### 实时推理（`yolo/realtime.py`）
+
+没有摄像头也能验证，所以先写了个工具把几张真实照片拼成测试视频：
+
+```powershell
+python tools\make_test_video.py        # 生成 runs/test-realtime.mp4（160 帧，约 5 秒）
+
+python yolo\realtime.py ^
+  --weights runs\train\coco8-ft\weights\best.pt ^
+  --source runs\test-realtime.mp4 --no-show --max-frames 160 --device 0
+```
+
+实测结果（RTX 4060，输入 640×640）：
+
+| 指标 | 数值 |
+| --- | --- |
+| 总帧数 | 160 |
+| 总耗时 | 3.23 s |
+| 平均帧率 | **49.5 FPS** |
+| 单帧推理 | 18.4 ms |
+| 结论 | 达到实时（≥25 FPS） |
+
+加上视频编码（`--save`）写文件之后是 26.4 FPS，仍然够实时。
+
+有摄像头/有屏幕的时候把 `--no-show` 去掉就是带窗口的版本，
+按 `q` 退出、按 `s` 存当前帧。
+
+### 独立推理服务（`yolo/serve.py`）
+
+把推理和主应用解耦部署（比如推理放显卡机器、应用放另一台），实测两个接口都正常：
+
+```powershell
+python yolo\serve.py --weights runs\train\coco8-ft\weights\best.pt --port 8600 --device 0
+```
+
+| 接口 | 实测返回 |
+| --- | --- |
+| `GET /health` | `{"ok": true, "classes": 80, "imgsz": 640, "conf": 0.25}` |
+| `POST /predict` | 同一张街景照片返回 12 个检测框，与进程内推理结果一致（car 0.79 / car 0.78 / motorcycle 0.77 …） |
+
+主应用只要配上 `AILAB_YOLO_REMOTE_URL=http://127.0.0.1:8600/predict` 就能走这条路。
+
+---
+
+## 九、局限（必须说清楚）
 
 1. **合成数据集那一轮的指标没有实际意义**：场景简单、背景干净，
    0.995 的 mAP 不代表真实效果。最直接的证据就是把真实照片喂给它，几乎认不出东西。
