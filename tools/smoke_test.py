@@ -207,10 +207,11 @@ def main() -> int:
         check("空图片返回 400", status == 400, f"HTTP {status}")
 
         print("\n6. 真实 YOLO 推理（有训练权重时才跑）")
-        weights = (
-            ROOT / "runs" / "train" / "synthetic-cpu" / "weights" / "best.pt"
-        )
-        sample_image = ROOT / "datasets" / "synthetic" / "images" / "val" / "val_0000.png"
+        # 优先用真实数据微调出来的权重（应用默认加载的就是它）
+        weights = ROOT / "runs" / "train" / "coco8-ft" / "weights" / "best.pt"
+        if not weights.exists():
+            weights = ROOT / "runs" / "train" / "synthetic-cpu" / "weights" / "best.pt"
+        sample_image = ROOT / "web" / "samples" / "street.jpg"
         if not weights.exists():
             print(f"  [跳过] 没有找到训练权重：{weights}")
         elif not sample_image.exists():
