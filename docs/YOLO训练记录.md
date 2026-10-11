@@ -11,18 +11,28 @@
 | 任务 | 目标检测（2 类：car / person） |
 | 模型 | YOLO11n（2,590,230 参数，6.5 GFLOPs） |
 | 训练轮数 | 100 epochs |
-| 训练耗时 | 0.087 小时（约 5.2 分钟） |
-| 设备 | CPU（12th Gen Intel Core i5-12490F） |
+| 设备 | **RTX 4060（8 GB）** |
+| 训练耗时 | **约 1.5 分钟** |
 | 验证集 mAP50 | **0.995** |
-| 验证集 mAP50-95 | **0.860** |
-| 单张推理耗时 | 8.5 ms（CPU） |
+| 验证集 mAP50-95 | **0.869** |
+| 单张推理耗时 | **1.7 ms** |
+| 训练时显存占用 | 0.4 GB（8 GB 里只用了 5%） |
+
+CPU 和 GPU 各跑了一次，除 `--device` 外参数完全相同，可以直接对比：
+
+| 对比项 | CPU（i5-12490F） | GPU（RTX 4060） | 差异 |
+| --- | --- | --- | --- |
+| 100 轮训练耗时 | 5.2 分钟 | **1.5 分钟** | 快约 3.5 倍 |
+| 单张推理耗时 | 8.5 ms | **1.7 ms** | 快约 5 倍 |
+| mAP50 | 0.995 | 0.995 | 持平 |
+| mAP50-95 | 0.860 | **0.869** | 略优 |
 
 分类别指标：
 
 | 类别 | 图片数 | 实例数 | Precision | Recall | mAP50 | mAP50-95 |
 | --- | --- | --- | --- | --- | --- | --- |
-| car | 11 | 17 | 0.979 | 1.000 | 0.995 | 0.860 |
-| person | 12 | 18 | 0.988 | 1.000 | 0.995 | 0.859 |
+| car | 11 | 17 | 1.000 | 0.993 | 0.995 | 0.893 |
+| person | 12 | 18 | 0.975 | 1.000 | 0.995 | 0.846 |
 
 ---
 
@@ -72,8 +82,8 @@ python tools/make_synthetic_dataset.py --train 60 --val 15 --size 320
 python yolo\train.py ^
   --data datasets\synthetic\data.yaml ^
   --model yolo11n.yaml ^
-  --epochs 100 --imgsz 320 --batch 8 --device cpu --workers 2 ^
-  --name synthetic-cpu
+  --epochs 100 --imgsz 320 --batch 8 --device 0 --workers 4 ^
+  --name synthetic-gpu
 ```
 
 | 参数 | 取值 | 说明 |
@@ -82,29 +92,59 @@ python yolo\train.py ^
 | `--epochs` | 100 | 30 轮的版本置信度偏低，加到 100 轮后正常 |
 | `--imgsz` | 320 | 与数据集尺寸一致 |
 | `--batch` | 8 | CPU 训练，8 足够稳定 |
-| `--device` | `cpu` | 见下文"关于显卡" |
+| `--device` | `0` | 第一块显卡（RTX 4060） |
+| `--workers` | 4 | 显卡训练时数据加载可以多开几个 |
 | 其余 | 默认 | 优化器 auto、AMP 开启、mosaic 等默认增强 |
 
 ### 关于显卡
 
-本机是 RTX 4060（8 GB），本该用 GPU 训练。但 `pip install ultralytics` 默认装的是
-**CPU 版 torch**（`2.14.1+cpu`），要换成 CUDA 版需要再从
-`download.pytorch.org` 下载 2.6 GB 的轮子，实测下载速度只有 0.65 MB/s，
-预计要一小时以上，中途还多次连接超时。
-
-权衡之后先走 CPU 路线把流程跑通——对这个数据集规模来说完全够用（5 分钟训完）。
-要把训练切到显卡的完整步骤写在 `tools/check_gpu.py` 的提示里，也贴在这里：
+`pip install ultralytics` 默认装的是 **CPU 版 torch**（`2.14.1+cpu`），
+所以第一次训练是在 CPU 上完成的。换成 CUDA 版的过程曲折，完整记录在这里：
 
 ```powershell
 pip uninstall -y torch torchvision
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
-# 官方源慢的话，国内镜像（实测可用）：
-pip install torch==2.14.1+cu126 torchvision==0.29.1+cu126 --no-index ^
-  -f https://mirrors.aliyun.com/pytorch-wheels/cu126/
+
+# 1. 清华镜像在这台机器上解析不了（pypi.tuna 和 mirrors.tuna 都不通），
+#    可用的国内镜像是阿里云的 pytorch-wheels。
+#    单连接只有 0.9 MB/s，2.6 GB 要 46 分钟；用项目自带的多线程下载工具：
+python tools\fast_download.py ^
+  http://mirrors.aliyun.com/pytorch-wheels/cu126/torch-2.14.1+cu126-cp313-cp313-win_amd64.whl ^
+  %TEMP%\pwheels\torch-2.14.1+cu126-cp313-cp313-win_amd64.whl --threads 6
+
+# 2. 校验文件完整，再本地安装
+python -m zipfile -t %TEMP%\pwheels\torch-2.14.1+cu126-cp313-cp313-win_amd64.whl
+pip install %TEMP%\pwheels\torch-2.14.1+cu126-cp313-cp313-win_amd64.whl
+
+# 3. torchvision 只有 6 MB，直接从镜像装
+pip install torchvision==0.29.1+cu126 --no-index ^
+  -f http://mirrors.aliyun.com/pytorch-wheels/cu126/ --trusted-host mirrors.aliyun.com
 ```
 
-装完用 `python tools\check_gpu.py` 确认 `显卡可用: True`，再把 `--device cpu`
-换成 `--device 0` 即可。
+三个容易踩的坑：
+
+1. **清华镜像在本机 DNS 解析失败**，实测可用的国内镜像只有阿里云的 pytorch-wheels
+   （魔搭社区能连，但没有现成的 torch wheel）；
+2. **单连接被限速**到 0.9 MB/s；改成 6 线程分段后能到 4~6 MB/s，15 分钟下完。
+   镜像传大文件时会随机断连（实测末尾有 3 个分片被重置，文件少了 2.5%），
+   所以 `tools/fast_download.py` 带断点续传和自动重试，中断后重跑同一条命令即可；
+3. **文件名必须符合 wheel 规范**。把 `torch-2.14.1+cu126-cp313-cp313-win_amd64.whl`
+   改名成 `torch-cu126.whl` 会被 pip 直接拒绝。
+
+装完用 `python tools\check_gpu.py` 确认：
+
+```
+PyTorch     : 2.14.1+cu126
+CUDA 编译版 : 12.6
+显卡可用    : True
+  显卡 0     : NVIDIA GeForce RTX 4060（显存 8.0 GB，算力 8.9）
+```
+
+之后把 `--device cpu` 换成 `--device 0` 即可。
+
+另外，显卡训练时 ultralytics 会做一次 AMP 自检，需要联网下载一个模型文件。
+本机连不上 GitHub，自检被跳过并提示 "checks skipped. Offline and unable to
+download YOLO26n"，训练仍按 `amp=True` 继续，实测没有出现 NaN 或 mAP 为 0，
+所以这次不用处理；真遇到问题再加 `--no-amp` 关掉。
 
 ---
 
@@ -136,27 +176,48 @@ runs/train/synthetic-cpu/
 ```powershell
 python tools\make_synthetic_dataset.py            # 1. 生成数据集
 python yolo\train.py --data datasets\synthetic\data.yaml --model yolo11n.yaml ^
-  --epochs 100 --imgsz 320 --batch 8 --device cpu   # 2. 训练
-python yolo\infer.py --weights runs\train\synthetic-cpu\weights\best.pt ^
-  --source datasets\synthetic\images\val\val_0000.png --device cpu   # 3. 推理
+  --epochs 100 --imgsz 320 --batch 8 --device 0   # 2. 训练（显卡）
+python yolo\infer.py --weights runs\train\synthetic-gpu\weights\best.pt ^
+  --source datasets\synthetic\images\val\val_0000.png --device 0   # 3. 推理
 ```
 
 ---
 
 ## 六、接进应用
 
-把训练出的权重接进 Web 应用：
+### 应用演示用 COCO 预训练权重
+
+自己训的模型只认识"合成风格的车和人"——用真实照片去测，效果很差，
+这是拿合成数据训练的必然结果。
+
+所以分成两条线，各自说清楚用途：
+
+| 权重 | 用途 | 能不能测真实照片 |
+| --- | --- | --- |
+| `yolo11n.pt`（COCO 预训练） | 应用里的真实图片演示 | 能，80 个真实类别 |
+| `runs/train/synthetic-gpu/weights/best.pt`（自己训练） | 证明训练流程跑通 | 不能，只认合成风格 |
+
+预训练权重从 HuggingFace 镜像下载（GitHub 在这台机器上不通）：
+
+```powershell
+curl -L -o yolo11n.pt https://hf-mirror.com/Ultralytics/YOLO11/resolve/main/yolo11n.pt
+
+python tools\start_background.py --provider ollama --model qwen2.5:1.5b ^
+  --vision-backend ultralytics --vision-weights yolo11n.pt --vision-conf 0.45
+```
+
+启动后打开 <http://127.0.0.1:8000>，检测面板右上角显示 `ultralytics`，
+点"示例图"载入的就是真实照片。效果见 [screenshot-yolo-real.png](images/screenshot-yolo-real.png)。
+
+### 自己训练的权重也能接
 
 ```powershell
 python tools\start_background.py --provider ollama --model qwen2.5:1.5b ^
   --vision-backend ultralytics ^
-  --vision-weights runs\train\synthetic-cpu\weights\best.pt ^
-  --vision-conf 0.45
+  --vision-weights runs\train\synthetic-gpu\weights\best.pt --vision-conf 0.45
 ```
 
-启动后打开 <http://127.0.0.1:8000>，检测面板右上角会从"未加载"变成 `ultralytics`，
-上传图片即可看到真实的检测框。效果截图见
-[docs/images/screenshot-yolo.png](images/screenshot-yolo.png)。
+这条链路只在合成风格的图片上有效，用来验证"自己训练的权重能跑通应用"。
 
 接口返回示例（`POST /api/detect`）：
 
@@ -164,29 +225,34 @@ python tools\start_background.py --provider ollama --model qwen2.5:1.5b ^
 {
   "ok": true,
   "engine": "ultralytics",
-  "model": "runs/train/synthetic-cpu/weights/best.pt",
-  "width": 640, "height": 400,
-  "elapsed_ms": 48.42,
+  "model": "yolo11n.pt",
+  "width": 810, "height": 1080,
+  "elapsed_ms": 25.84,
   "boxes": [
-    {"x1": 88.51, "y1": 265.37, "x2": 191.74, "y2": 322.97,
-     "score": 0.8821, "label": "car", "cls": 0}
+    {"x1": 3.8, "y1": 229.36, "x2": 796.22, "y2": 728.41,
+     "score": 0.9403, "label": "bus", "cls": 5},
+    {"x1": 671.02, "y1": 394.81, "x2": 809.81, "y2": 878.72,
+     "score": 0.8882, "label": "person", "cls": 0}
   ]
 }
 ```
 
-实测：把项目自带的示例图（3 辆车 + 1 个行人）喂进去，4 个目标全部正确识别，
-置信度分别是 0.88 / 0.86 / 0.79 / 0.64。
+实测：真实照片（一辆公交车 + 四名行人）上，模型给出 bus 0.94、
+person 0.89 / 0.88 / 0.86 / 0.62，全部正确，单张 25.8 ms。
 
 ---
 
 ## 七、局限（必须说清楚）
 
 1. **数据集是合成的**，场景简单、背景干净，0.995 的 mAP 不代表真实道路场景的效果。
-   要得到有意义的指标，应该换成 COCO 子集、VOC 或自己标注的数据。
+   最直接的证据：把真实照片喂给这个自己训练的模型，它几乎认不出东西——
+   它学的是"合成风格的车和人"。要得到有意义的指标，必须换成 COCO 子集、
+   VOC 或自己标注的真实数据。
 2. **偶尔出现重复框**：同一辆车有时会被框两次（例如整体一个框、车身又一个框）。
    验证集指标看不出这个问题，因为 NMS 之后的重复框占比很小。
    工程上的应对是把置信度阈值调高（本项目用 0.45）或降低 NMS 的 IoU 阈值。
 3. **没有做数据增强的调参实验**，用的全是 ultralytics 默认增强。
-4. **模型是从零训练的**，没用预训练权重做迁移学习——因为拿不到权重文件。
-   能联网时把 `--model yolo11n.yaml` 换成 `--model yolo11n.pt`，
-   用更少轮数就能取得更好的效果。
+4. **这次训练是从零开始的**（`--model yolo11n.yaml`），因为一开始拿不到预训练权重。
+   后来从 HuggingFace 镜像下到了 `yolo11n.pt`，所以下一步应该改成
+   **用预训练权重在真实数据上微调**：把 `--model yolo11n.yaml` 换成
+   `--model yolo11n.pt`，再加一个真实数据集，用更少的轮数就能得到能用于真实场景的模型。

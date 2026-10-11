@@ -22,9 +22,9 @@
 | 2. 搭建智能体（Dify / n8n / 扣子等） | `app/agent/` 自带轻量智能体（意图识别 → 工具执行 → 交回模型），同时支持把 Dify / 扣子的 OpenAI 兼容地址当作模型后端接入 |
 | 3. 以 API 形式接入应用 | `app/server/http_app.py`：`POST /api/chat`（SSE 流式）、`POST /api/detect`，全部 HTTP + JSON |
 | 4. 应用形式 | CLI（`run_cli.py`）、Web（`web/`）、桌面（`desktop/`，Edge 应用模式 + Electron 两种） |
-| 二 1. 完成一次 Ultralytics 训练 | **已跑通**：YOLO11n，100 epochs，自建 75 张数据集，mAP50 **0.995**，详见 [YOLO 训练记录](docs/YOLO训练记录.md) |
+| 二 1. 完成一次 Ultralytics 训练 | **已跑通**：YOLO11n，100 epochs，RTX 4060 上 1.5 分钟，mAP50 **0.995**，详见 [YOLO 训练记录](docs/YOLO训练记录.md) |
 | 二 2. 实时推理部署 | `yolo/infer.py`（图片/目录/视频）、`yolo/realtime.py`（摄像头 + FPS）、`yolo/export.py`（导出 ONNX/TensorRT）、`yolo/serve.py`（独立推理服务） |
-| 二 3. 接入应用 | **已接通**：Web 端上传图片 → ultralytics 推理 → 前端 canvas 画框；项目自带示例图上 4 个目标全部命中 |
+| 二 3. 接入应用 | **已接通**：上传真实照片 → ultralytics 推理 → 前端 canvas 画框；示例照片上公交车与 4 名行人全部命中 |
 
 ---
 
@@ -129,11 +129,12 @@ python run_server.py
 | --- | --- |
 | 模型 | YOLO11n（2,590,230 参数，6.5 GFLOPs） |
 | 数据集 | 75 张合成图（60 训练 / 15 验证），2 类：car / person |
-| 训练 | 100 epochs，imgsz 320，batch 8，CPU，约 5.2 分钟 |
-| 验证集 | mAP50 **0.995**，mAP50-95 **0.860** |
-| 推理 | 8.5 ms / 张（CPU） |
+| 训练 | 100 epochs，imgsz 320，batch 8，**RTX 4060，约 1.5 分钟** |
+| 验证集 | mAP50 **0.995**，mAP50-95 **0.869** |
+| 推理 | **1.7 ms / 张（GPU）**，CPU 上是 8.5 ms |
 
-数据集是脚本生成的（这台机器访问不了 GitHub，拿不到 coco8 和预训练权重），
+同一套参数在 CPU 上跑了 5.2 分钟，换成显卡后 1.5 分钟，快约 3.5 倍。
+数据集是脚本生成的（这台机器访问不了 GitHub，拿不到 coco8），
 标注格式与真实数据集完全一致，换成自己的数据只需改 `data.yaml` 的路径。
 完整记录见 [YOLO 训练记录](docs/YOLO训练记录.md)。
 
@@ -141,16 +142,22 @@ python run_server.py
 python tools\check_gpu.py                     # 1. 先看显卡环境
 python tools\make_synthetic_dataset.py        # 2. 生成合成数据集
 python yolo\train.py --data datasets\synthetic\data.yaml --model yolo11n.yaml ^
-  --epochs 100 --imgsz 320 --batch 8 --device cpu    # 3. 训练
+  --epochs 100 --imgsz 320 --batch 8 --device 0      # 3. 训练（显卡）
 ```
 
-训练完把权重接进应用：
+**关于真实图片**：自己训练的模型只认合成风格的车和人，拿真实照片去测效果很差。
+所以应用里的演示用的是 COCO 预训练权重 `yolo11n.pt`（能识别 80 个真实类别），
+自己训练的权重用于验证训练流程跑通。
 
 ```powershell
+# 预训练权重从 HuggingFace 镜像下载（GitHub 在这台机器上不通）
+curl -L -o yolo11n.pt https://hf-mirror.com/Ultralytics/YOLO11/resolve/main/yolo11n.pt
+
 python tools\start_background.py --provider ollama --model qwen2.5:1.5b ^
-  --vision-backend ultralytics ^
-  --vision-weights runs\train\synthetic-cpu\weights\best.pt --vision-conf 0.45
+  --vision-backend ultralytics --vision-weights yolo11n.pt --vision-conf 0.45
 ```
+
+效果见 [docs/images/screenshot-yolo-real.png](docs/images/screenshot-yolo-real.png)。
 
 ### 1. 装依赖
 
