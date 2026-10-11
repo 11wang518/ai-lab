@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import socket
 import threading
 import time
@@ -297,7 +298,10 @@ class Handler(BaseHTTPRequestHandler):
 
 class LabServer(ThreadingHTTPServer):
     daemon_threads = True
-    allow_reuse_address = True
+    # Windows 上 SO_REUSEADDR 的语义和 Linux 不同：它允许两个进程绑同一个端口，
+    # 请求会随机落到其中一个（表现为"改了启动参数却不生效"）。
+    # 所以 Windows 上关掉它，端口被占用时就让绑定直接失败。
+    allow_reuse_address = os.name != "nt"
 
     def __init__(self, address, handler, app: Application, verbose: bool = False):
         self.app = app
@@ -342,7 +346,11 @@ def find_free_port(host: str, start: int, attempts: int = 20) -> int:
     for offset in range(attempts):
         port = start + offset
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                # 必须独占：否则已占用的端口也会被判成"可用"
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            else:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 sock.bind((host, port))
             except OSError:

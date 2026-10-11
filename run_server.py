@@ -62,7 +62,14 @@ def main() -> int:
             ),
         )
 
-    server = create_server(config, verbose=args.verbose)
+    try:
+        server = create_server(config, verbose=args.verbose)
+    except OSError as exc:
+        # 最常见的是端口被占用（Windows 上是 WinError 10048）
+        print(f"[启动失败] 端口 {config.server.port} 无法绑定：{exc}")
+        print("          可能已经有一个服务在跑，或者端口被别的程序占用。")
+        print("          换一个端口试试：python run_server.py --port 8010")
+        return 1
     serve_forever(server)
     return 0
 
