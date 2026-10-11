@@ -1,307 +1,150 @@
 # AI Lab：本地大模型 + YOLO 一体化应用
 
-一台 8G 显存的 RTX 4060 上，把「本地小模型对话」和「YOLO 目标检测」接进同一个应用里。
-主应用**零第三方依赖**，只用 Python 标准库，克隆下来就能启动；大模型和 YOLO 通过可插拔后端接入，
-装不装、用哪种，都不影响应用先跑起来。
+在一台 8G 显存的 RTX 4060 上，**本地部署 Qwen2.5 做对话、自己训练 YOLO 做目标检测**，
+用一个 Web 应用把两者串起来；同一套后端还提供 CLI 和桌面形态。
 
-**只想快速上手**：双击 `start-server.cmd`，浏览器打开 <http://127.0.0.1:8000/>。
-**要拿去演示/答辩**：直接看 [答辩指南](docs/答辩指南.md)。
+主应用**零第三方依赖**（只用 Python 标准库），克隆下来就能跑起来。
 
-其余文档按需查：
+## 文档
 
-- [答辩指南](docs/答辩指南.md)：项目在哪、怎么启动、演示顺序、可能被问到的问题
-- [实现思路与架构](docs/实现思路与架构.md)：为什么这么设计，有哪些取舍
-- [工程日志](docs/开发日志.md)：每个阶段卡在哪、当时怎么判断的
-- [YOLO 训练记录](docs/YOLO训练记录.md)：数据集、参数、指标、局限，以及复现命令
-- [模型部署与显存规划](docs/模型部署与显存规划.md)：8G 显存怎么选模型、怎么调参
-
----
-
-## 一、对应作业要求
-
-| 要求 | 本项目实现 |
+| 文档 | 内容 |
 | --- | --- |
-| 1. 本地部署大模型（Llama.cpp / Ollama / LM Studio） | `app/llm/providers.py` 提供 Ollama 与 OpenAI 兼容两类客户端，覆盖 Ollama、LM Studio、llama.cpp server、vLLM；模型选了 2B 级的 `qwen2.5:1.5b` |
-| 2. 搭建智能体（Dify / n8n / 扣子等） | `app/agent/` 自带轻量智能体（意图识别 → 工具执行 → 交回模型），同时支持把 Dify / 扣子的 OpenAI 兼容地址当作模型后端接入 |
-| 3. 以 API 形式接入应用 | `app/server/http_app.py`：`POST /api/chat`（SSE 流式）、`POST /api/detect`，全部 HTTP + JSON |
-| 4. 应用形式 | CLI（`run_cli.py`）、Web（`web/`）、桌面（`desktop/`，Edge 应用模式 + Electron 两种） |
-| 二 1. 完成一次 Ultralytics 训练 | **已跑通两轮**：合成数据从零训练（mAP50 0.995）+ 真实 COCO8 微调（mAP50 0.872），均在 RTX 4060 上完成，详见 [YOLO 训练记录](docs/YOLO训练记录.md) |
-| 二 2. 实时推理部署 | **已实测**：命令行版 `yolo/realtime.py` 达 **49.5 FPS**（单帧 18.4 ms）；**网页端也支持摄像头实时检测**（页面上点"摄像头实时"，接口往返 17.8 ms）；`yolo/serve.py` 独立推理服务的 `/health` 与 `/predict` 均验证通过 |
-| 二 3. 接入应用 | **已接通**：应用加载**自己微调的模型**，真实街景照片上识别出 3 辆车、1 辆电动车、2 个行人 |
+| [作业一：大模型](作业一-大模型.md) | 本地部署、显存实测、智能体、通过 API 接入应用 |
+| [作业二：YOLO](作业二-YOLO.md) | 训练、实时推理、接入应用、局限说明 |
+| [工作日志](工作日志.md) | 每个阶段卡在哪、当时怎么判断的 |
 
 ---
 
-## 二、快速开始（不装任何依赖）
+## 快速开始
+
+前置条件：装好 [Ollama](https://ollama.com/download) 并拉取模型
 
 ```powershell
-cd D:\tools\codex\ai-lab
-python run_server.py
-```
-
-浏览器打开 <http://127.0.0.1:8000>。
-
-本机已经装好 Ollama 和 `qwen2.5:1.5b`，直接双击项目根目录的 `start-server.cmd`
-就会用真实模型启动，不用敲命令。
-
-如果只敲 `python run_server.py` 不带参数，模型后端会退回内置的示例模型
-（规则匹配 + 流式输出），检测后端显示"未就绪"。这两条提示都是有意设计的：
-**先确认链路通，再逐个换成真模型**。要接 Ollama 就加 `--provider ollama --model qwen2.5:1.5b`。
-
-想一键看到满血效果，打开 <http://127.0.0.1:8000/?demo=1>：
-自动载入示例图、跑一次检测、发一条会触发工具调用的消息。
-
-命令行版：
-
-```powershell
-python run_cli.py
-python run_cli.py --once "帮我算一下 12*(3+4)"
-```
-
-桌面版（用 Edge/Chrome 的应用模式，无需打包）：
-
-```powershell
-python desktop\run_desktop.py
-```
-
----
-
-## 三、接入真实大模型
-
-### 方案 A：Ollama（推荐，命令最少）
-
-```powershell
-# 1. 安装：https://ollama.com/download
-# 2. 拉一个 2B 级的千问（8G 显存非常宽裕）
 ollama pull qwen2.5:1.5b
-
-# 3. 让应用指向 Ollama
-python run_server.py --provider ollama --model qwen2.5:1.5b
 ```
 
-Ollama 自带 OpenAI 兼容接口，所以下面的方案 B 其实也能指向它
-（`http://127.0.0.1:11434/v1`）。
+然后双击项目根目录的 **`start-server.cmd`**，浏览器打开 <http://127.0.0.1:8000/>。
 
-### 方案 B：LM Studio
-
-1. 打开 LM Studio，搜索并下载 `Qwen2.5-1.5B-Instruct`（或 3B）。
-2. 左侧 `Developer` → 启动本地服务器（默认 `http://127.0.0.1:1234`）。
-3. 启动应用：
+等价的手工命令（想看清楚参数就用这条）：
 
 ```powershell
-$env:AILAB_LLM_PROVIDER="openai"
-$env:AILAB_OPENAI_BASE_URL="http://127.0.0.1:1234/v1"
-$env:AILAB_LLM_MODEL="qwen2.5-1.5b-instruct"
-python run_server.py
-```
-
-### 方案 C：llama.cpp
-
-```powershell
-# 下载 GGUF 权重（魔搭 / HuggingFace 都有 Qwen2.5-1.5B-Instruct-GGUF）
-.\llama-server.exe -m qwen2.5-1.5b-instruct-q4_k_m.gguf -c 4096 --port 8080
-
-$env:AILAB_LLM_PROVIDER="openai"
-$env:AILAB_OPENAI_BASE_URL="http://127.0.0.1:8080/v1"
-python run_server.py
-```
-
-### 方案 D：Dify / 扣子等平台
-
-在平台上把应用发布成 API，拿到 OpenAI 兼容的 `Base URL` 和 `API Key`，然后：
-
-```powershell
-$env:AILAB_LLM_PROVIDER="openai"
-$env:AILAB_OPENAI_BASE_URL="https://你的平台地址/v1"
-$env:AILAB_LLM_MODEL="你的应用名"
-$env:AILAB_OPENAI_API_KEY="sk-xxxx"
-python run_server.py
-```
-
-模型下载源：
-
-- 魔搭社区 <https://www.modelscope.cn/models>
-- Hugging Face <https://huggingface.co/models>
-
----
-
-## 四、跑通 YOLO
-
-### 本机已完成的一次训练
-
-| 项目 | 结果 |
-| --- | --- |
-| 模型 | YOLO11n（2,590,230 参数，6.5 GFLOPs） |
-| 数据集 | 75 张合成图（60 训练 / 15 验证），2 类：car / person |
-| 训练 | 100 epochs，imgsz 320，batch 8，**RTX 4060，约 1.5 分钟** |
-| 验证集 | mAP50 **0.995**，mAP50-95 **0.869** |
-| 推理 | **1.7 ms / 张（GPU）**，CPU 上是 8.5 ms |
-
-同一套参数在 CPU 上跑了 5.2 分钟，换成显卡后 1.5 分钟，快约 3.5 倍。
-数据集是脚本生成的（这台机器访问不了 GitHub，拿不到 coco8），
-标注格式与真实数据集完全一致，换成自己的数据只需改 `data.yaml` 的路径。
-完整记录见 [YOLO 训练记录](docs/YOLO训练记录.md)。
-
-```powershell
-python tools\check_gpu.py                     # 1. 先看显卡环境
-python tools\make_synthetic_dataset.py        # 2. 生成合成数据集
-python yolo\train.py --data datasets\synthetic\data.yaml --model yolo11n.yaml ^
-  --epochs 100 --imgsz 320 --batch 8 --device 0      # 3. 训练（显卡）
-```
-
-### 用真实数据微调（让自有模型也能认真实照片）
-
-合成数据训出来的模型在真实照片上不可用，所以又做了第二轮：**用真实数据微调**。
-数据是 COCO8（8 张真实照片 + 真实标注，YOLO 格式），用预训练权重作为起点。
-
-| 项目 | 结果 |
-| --- | --- |
-| 起点 | `yolo11n.pt` 预训练权重（499/499 层全部继承） |
-| 数据 | COCO8，4 训练 / 4 验证，真实照片 |
-| 训练 | 50 轮（第 19 轮最佳后早停），imgsz 640，GPU，**约 25 秒** |
-| 验证集 | mAP50 **0.872**，mAP50-95 **0.645** |
-| 真实街景照片 | 识别出 car 0.79 / car 0.78 / motorcycle 0.77 / person 0.60 等 6 个目标 |
-
-```powershell
-python tools\fetch_coco8.py                   # 从 HuggingFace 镜像取真实数据集
-python yolo\train.py --data datasets\coco8\data.yaml --model yolo11n.pt ^
-  --epochs 50 --imgsz 640 --batch 8 --device 0      # 微调
-```
-
-### 应用默认加载的是自己训练的模型
-
-```powershell
-python tools\start_background.py --provider ollama --model qwen2.5:1.5b ^
-  --vision-backend ultralytics ^
+python run_server.py --provider ollama --model qwen2.5:1.5b `
+  --vision-backend ultralytics `
   --vision-weights runs\train\coco8-ft\weights\best.pt --vision-conf 0.45
 ```
 
-效果见 [docs/images/screenshot-yolo-real.png](docs/images/screenshot-yolo-real.png)。
-三个权重的分工：`coco8-ft`（真实数据微调，应用默认）、`yolo11n.pt`（预训练起点）、
-`synthetic-gpu`（合成数据从零训练，只用于验证训练流程）。
+> `runs\train\coco8-ft\weights\best.pt` 是训练产物，**不在仓库里**（权重文件被忽略）。
+> 没有它也能启动——检测面板会提示"未就绪"，按 [作业二](作业二-YOLO.md) 里的步骤跑一次训练即可。
 
-### 实时推理与独立推理服务（已实测）
-
-没有摄像头也能验证——先用工具把几张真实照片拼成测试视频：
+命令行版和桌面版：
 
 ```powershell
-python tools\make_test_video.py       # 生成 runs\test-realtime.mp4（160 帧）
-
-# 实时推理基准：49.5 FPS，单帧 18.4 ms（RTX 4060）
-python yolo\realtime.py --weights runs\train\coco8-ft\weights\best.pt ^
-  --source runs\test-realtime.mp4 --no-show --max-frames 160 --device 0
-
-# 独立推理服务（推理与应用解耦部署）
-python yolo\serve.py --weights runs\train\coco8-ft\weights\best.pt --port 8600 --device 0
-```
-
-有摄像头和屏幕时去掉 `--no-show`，就是带窗口的版本，按 `q` 退出。
-
-**网页端实时检测**（演示最方便，不用开终端）：打开 <http://127.0.0.1:8000/>，
-点"摄像头实时"；或者直接用 <http://127.0.0.1:8000/?camera=1> 一步进入。
-页面会实时显示帧率和识别到的目标数。
-
-想压测接口性能可以跑：
-
-```powershell
-python tools\bench_detect.py --frames 60      # 实测平均往返 17.8 ms
-```
-
-### 1. 装依赖
-
-```powershell
-pip install ultralytics
-python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
-```
-
-`torch.cuda.is_available()` 必须是 `True`。如果显卡版 PyTorch 没装上，
-按 <https://pytorch.org/get-started/locally/> 选择 CUDA 版本重装。
-
-### 2. 训练
-
-先用 `yolo/data.example.yaml` 的格式准备数据集（`images/` + `labels/`），
-然后：
-
-```powershell
-python yolo/train.py --data datasets\mydata\data.yaml --epochs 50 --batch 8 --imgsz 640
-```
-
-8G 显存的建议：
-
-| 模型 | imgsz | batch | 说明 |
-| --- | --- | --- | --- |
-| `yolo11n.pt` | 640 | 8 | 默认，最稳 |
-| `yolo11s.pt` | 640 | 4 | 精度更高，显存吃紧 |
-| `yolo11n.pt` | 512 | 8 | 报显存不足时先降分辨率 |
-
-训练完输出在 `runs/train/exp/weights/best.pt`，脚本会自动跑一次验证集并打印 mAP。
-
-### 3. 推理与实时部署
-
-```powershell
-# 单张图片
-python yolo\infer.py --weights runs\train\exp\weights\best.pt --source test.jpg --json out.json
-
-# 整个文件夹
-python yolo\infer.py --weights yolo11n.pt --source images\
-
-# 摄像头实时（弹窗里显示 FPS，按 q 退出）
-python yolo\realtime.py --weights yolo11n.pt --source 0 --imgsz 480 --half
-```
-
-### 4. 接进应用（两种方式）
-
-**方式一：本机进程内推理**
-
-```powershell
-$env:AILAB_YOLO_WEIGHTS="runs\train\exp\weights\best.pt"
-python run_server.py --vision-backend ultralytics
-```
-
-不设 `AILAB_YOLO_WEIGHTS` 时会用默认的 `yolo11n.pt`。
-
-启动后打开网页的"目标检测"面板，上传图片即可看到画框结果。
-
-**方式二：独立推理服务**（把推理放到另一台机器，或把依赖和主应用隔离）
-
-```powershell
-# 终端 1
-python yolo\serve.py --weights yolo11n.pt --port 8600
-
-# 终端 2
-$env:AILAB_YOLO_REMOTE_URL="http://127.0.0.1:8600/predict"
-python run_server.py
-```
-
-### 5. 导出成部署格式
-
-```powershell
-python yolo\export.py --weights yolo11n.pt --format onnx --simplify
-python yolo\export.py --format engine --half      # 需要装 TensorRT
+python run_cli.py                 # 命令行对话
+python desktop\run_desktop.py     # 桌面窗口（用 Edge/Chrome 应用模式）
 ```
 
 ---
 
-## 五、目录结构
+## 对应作业要求
+
+### 一、大模型
+
+| 要求 | 实现 |
+| --- | --- |
+| 1. 完成本地大模型部署 | Ollama + `qwen2.5:1.5b`（Q4_K_M），实测占显存 1166 MB、全部在 GPU 上；详见 [作业一](作业一-大模型.md) |
+| 2. 搭建自己的智能体 | `app/agent/`：意图识别 → 执行工具 → 结果交回模型；同时支持把 Dify / 扣子等平台的 OpenAI 兼容接口当模型后端 |
+| 3. 作为 model provider 通过 API 接入应用 | `POST /api/chat`（SSE 流式） |
+| 4. 应用形式 | CLI（`run_cli.py`）、Web（`web/`）、桌面（`desktop/`，Edge 应用模式 + Electron 两种） |
+
+### 二、YOLO
+
+| 要求 | 实现 |
+| --- | --- |
+| 1. 完成一次 ultralytics 训练 | 两轮：合成数据从零训练（mAP50 0.995）+ 真实 COCO8 微调（mAP50 0.872），均在 RTX 4060 上完成 |
+| 2. 实时推理部署 | `yolo/realtime.py` 实测 **49.5 FPS**（单帧 18.4 ms）；网页端也支持摄像头实时检测；另有独立推理服务 `yolo/serve.py` |
+| 3. 接入应用 | 应用加载**自己微调的模型**，真实街景照片上识别出车辆、电动车、行人 |
+
+---
+
+## 设计思路
+
+### 1. 先想清楚"哪些东西会变"
+
+会变的只有四件事：用哪个大模型、模型跑在哪、YOLO 用什么权重、应用长什么样。
+所以按"会变的东西"切层，而不是按技术栈切：
+
+```
+界面层   CLI | Web | 桌面
+协议层   HTTP + JSON + SSE        ← 唯一固定的接口
+能力层   对话服务 | 检测服务 | 智能体
+后端层   模型后端可插拔 | 检测后端可插拔
+```
+
+换模型、换推理位置都只发生在最底层，上面三层不用动。
+
+### 2. 为什么主应用零依赖
+
+这台机器装不上第三方包（访问不了软件源）。如果主应用依赖 FastAPI，
+"打开就能看"就变成"先想办法装上 FastAPI"。改成标准库之后，
+代价是自己实现 HTTP 服务、SSE 分块输出和 multipart 解析，
+换来的是任何装了 Python 的机器都能跑起来。
+
+**边界要说清楚**：零依赖只约束主应用。YOLO 那边该装 ultralytics 就装，
+不为了"零依赖"去手写检测器。
+
+### 3. 智能体为什么不用原生 function calling
+
+本机是 2B 级小模型，实测原生 tool calling 有两个现实问题：很多小模型不支持；
+支持的也常把 JSON 格式写错，一处出错整条链路就断。
+
+所以改成**两段式**：本地规则识别意图 → 执行工具 → 把结果作为系统消息交回模型，
+让模型只负责"把结果说清楚"。好处是**数字不会算错**，这是小模型最容易翻车的地方。
+
+代价是意图识别靠关键词，覆盖面有限。这是明确的取舍：
+宁可少支持几个工具，也不要让 2B 模型去猜 JSON。
+
+### 4. 检测链路的三级降级
+
+```
+ultralytics（本机，最快）
+    ↓ 不可用
+远程推理服务（yolo/serve.py，可放到别的机器）
+    ↓ 不可用
+明确返回"未就绪"，前端降级到浏览器端算法并标注"非 YOLO 结果"
+```
+
+**"没有模型"也是一个合法结果**，要如实告诉用户，而不是编一个看起来像检测结果的东西。
+
+### 5. 桌面端为什么不直接上 Electron 打包
+
+Electron 需要 `npm install`（几百 MB）和构建步骤，在装不了依赖的环境里走不通。
+所以给了两条路：`desktop/run_desktop.py` 复用系统已有的 Edge/Chrome（零依赖，用于演示），
+`desktop/electron/` 负责后续产品化打包。
+
+---
+
+## 目录结构
 
 ```
 ai-lab/
-├─ app/                    主应用（Python 标准库）
-│  ├─ config.py            全部配置，环境变量覆盖
-│  ├─ llm/                 模型后端：demo / ollama / openai 兼容
-│  ├─ agent/               轻量智能体：tools + 意图路由
-│  ├─ vision/              检测后端：ultralytics / remote / none
-│  ├─ server/              HTTP 服务：静态资源 + SSE + 上传
-│  └─ cli.py               命令行客户端
-├─ web/                    前端（原生三件套，无构建步骤）
-├─ yolo/                   训练、推理、实时、导出、推理服务
-├─ desktop/                桌面壳：Edge 应用模式 + Electron
-├─ tools/                  示例图生成、端到端冒烟测试
-└─ docs/                   部署笔记与实验报告
+├─ README.md              项目总说明
+├─ 作业一-大模型.md        本地部署、智能体、API 接入
+├─ 作业二-YOLO.md          训练、实时推理、接入应用
+├─ 工作日志.md             开发过程记录
+├─ images/                文档用的截图
+├─ app/                   后端：配置、模型接入、智能体、检测、HTTP 服务、CLI
+├─ web/                   前端（原生三件套，无构建步骤）
+├─ yolo/                  训练、推理、实时、导出、独立推理服务
+├─ desktop/               桌面端（Edge 应用模式 + Electron）
+├─ tools/                 数据集下载、自检、压测等工具
+├─ run_server.py          服务入口
+├─ run_cli.py             命令行入口
+└─ start-server.cmd       双击启动（Windows）
 ```
 
 ---
 
-## 六、接口说明
+## 接口说明
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -328,95 +171,76 @@ ai-lab/
 {
   "ok": true,
   "engine": "ultralytics",
-  "model": "yolo11n.pt",
-  "width": 640,
-  "height": 400,
-  "elapsed_ms": 42.7,
+  "model": "runs/train/coco8-ft/weights/best.pt",
+  "width": 720, "height": 1280, "elapsed_ms": 21.3,
   "boxes": [
-    { "x1": 72, "y1": 262, "x2": 214, "y2": 322, "score": 0.87, "label": "car", "cls": 2 }
+    { "x1": 167.4, "y1": 483.7, "x2": 276.5, "y2": 560.1,
+      "score": 0.7855, "label": "car", "cls": 2 }
   ]
 }
 ```
 
-`engine` 为 `none` 时表示没有可用模型，前端会降级到浏览器端的显著性算法演示，
-并在界面上明确标注"非 YOLO 结果"，不会拿假结果冒充模型输出。
-
 ---
 
-## 七、环境变量
+## 环境变量
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `AILAB_LLM_PROVIDER` | `demo` | `demo` / `ollama` / `openai` |
 | `AILAB_LLM_MODEL` | `qwen2.5:1.5b` | 模型名 |
 | `AILAB_OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama 地址 |
-| `AILAB_OPENAI_BASE_URL` | `http://127.0.0.1:1234/v1` | OpenAI 兼容地址 |
+| `AILAB_OPENAI_BASE_URL` | `http://127.0.0.1:1234/v1` | 任意 OpenAI 兼容地址（LM Studio / Dify / 扣子 / 云端） |
 | `AILAB_OPENAI_API_KEY` | `not-needed` | 本地服务随便填 |
-| `AILAB_LLM_TEMPERATURE` | `0.7` | 采样温度 |
 | `AILAB_YOLO_BACKEND` | `auto` | `auto` / `ultralytics` / `remote` / `none` |
 | `AILAB_YOLO_WEIGHTS` | `yolo11n.pt` | 权重路径 |
 | `AILAB_YOLO_CONF` | `0.25` | 置信度阈值 |
-| `AILAB_YOLO_IMGSZ` | `640` | 推理分辨率 |
 | `AILAB_YOLO_DEVICE` | 空 | `0` / `cpu` |
 | `AILAB_YOLO_REMOTE_URL` | 空 | 远程推理服务地址 |
 | `AILAB_PORT` | `8000` | 服务端口 |
 
 ---
 
-## 八、版本控制与提交规范
-
-仓库已经初始化好（`main` 分支），关键文件：
-
-- `.gitignore`：排除 `runs/`、`datasets/`、`*.pt`、`*.onnx` 等训练产物和大文件；
-- `.gitattributes`：统一按 LF 存储，避免跨系统换行差异。
-
-提交信息用 [Conventional Commits](https://www.conventionalcommits.org/) 前缀 + 中文描述，
-例如 `feat(llm): 实现大模型接入层与命令行客户端`。前缀含义：
-
-| 前缀 | 用在什么地方 |
-| --- | --- |
-| `feat` | 新增功能 |
-| `fix` | 修 bug |
-| `docs` | 只改文档 |
-| `test` | 只改测试 |
-| `chore` | 构建、配置、依赖等杂项 |
-
-推送到 GitHub 的完整步骤见 [Git 与 GitHub 操作指南](docs/Git与GitHub操作指南.md)。
-
----
-
-## 九、自测
+## 自测
 
 ```powershell
 python tools\smoke_test.py
 ```
 
 会自己拉起服务、依次访问所有接口，覆盖静态资源、SSE 流式对话、工具调用、
-图片上传检测和错误分支，最后打印通过/失败统计。当前版本 23 项全部通过。
+图片上传检测、错误分支，以及**加载真实权重跑一次推理**。当前 27 项全部通过。
 
-接上真实模型后，再跑一次连通性自检：
+另有三个专项检查：
 
 ```powershell
-python tools\check_llm.py --provider ollama --model qwen2.5:1.5b
+python tools\check_llm.py --provider ollama --model qwen2.5:1.5b   # 大模型连通性与速度
+python tools\check_gpu.py                                          # 显卡与 torch 环境
+python tools\bench_detect.py --frames 60                           # 检测接口往返耗时
 ```
-
-它会先直连模型后端测延迟和速度，再通过应用自己的接口测一遍，
-两边都通才算接通。本机实测结果见 [模型部署与显存规划](docs/模型部署与显存规划.md)。
 
 ---
 
-## 十、常见问题
+## 常见问题
 
-**端口被占用？**
-`run_server.py` 会自动往后找可用端口，启动日志里有实际地址。想固定端口就用 `--port`。
+**网页打不开？**
+先看 `start-server.cmd` 窗口里的日志。Windows 上如果 8000 被占用，脚本会自动往后找端口，
+注意它打印的实际地址。另外确认 Ollama 在运行（`ollama list` 能看到 `qwen2.5:1.5b`）。
+
+**检测面板显示"未就绪"？**
+说明没有可用的权重。按 [作业二](作业二-YOLO.md) 跑一次训练，
+或者用环境变量 `AILAB_YOLO_WEIGHTS` 指向已有的 `.pt` 文件。
 
 **Ollama 连不上？**
-先确认 `ollama serve` 在跑，再 `curl http://127.0.0.1:11434/api/tags` 看能不能列出模型。
-界面顶栏的状态点变绿才算接通。
+确认服务在跑（托盘图标），再用 `curl http://127.0.0.1:11434/api/tags` 看能否列出模型。
 
 **训练报 CUDA out of memory？**
-按顺序试：`--batch 4` → `--imgsz 512` → `--cache` 去掉 → 换 `yolo11n.pt`。
+按顺序试：`--batch 4` → `--imgsz 512` → 换 `yolo11n.pt`。
 
-**检测面板一直显示"未就绪"？**
-说明 `import ultralytics` 失败。先 `pip install ultralytics`；
-不想在主环境装，就用 `yolo/serve.py` 起独立服务，再配 `AILAB_YOLO_REMOTE_URL`。
+---
+
+## 版本控制
+
+仓库用 Conventional Commits 规范提交（`feat` / `fix` / `docs` / `test` / `chore`），
+一次提交只做一件事。`.gitignore` 排除了 `runs/`、`datasets/`、`*.pt`、`*.mp4` 等训练产物，
+`.gitattributes` 统一按 LF 存储。
+
+> 训练权重、数据集和测试视频都**不在仓库里**，需要按文档里的命令重新生成。

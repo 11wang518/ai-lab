@@ -20,5 +20,8 @@ _*.png
 *.mp4
 *.avi
 
+# 本地自用笔记（答辩指南等），不上传
+_local-notes/
+
 .idea/
 .vscode/
