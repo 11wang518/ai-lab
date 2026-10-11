@@ -21,7 +21,7 @@ from app.config import AppConfig  # noqa: E402
 from app.server.http_app import create_server, find_free_port, serve_in_background  # noqa: E402
 
 # 用真实照片做示例，和界面上"示例图"按钮保持一致
-SAMPLE = ROOT / "web" / "samples" / "bus.jpg"
+SAMPLE = ROOT / "web" / "samples" / "street.jpg"
 
 PASSED: list[str] = []
 FAILED: list[str] = []
