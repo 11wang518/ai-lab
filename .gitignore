@@ -10,6 +10,8 @@ datasets/
 *.onnx
 *.engine
 *.openvino/
+.ultralytics/
+.matplotlib/
 
 # 临时截图
 _*.png

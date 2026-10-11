@@ -18,6 +18,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 
 from ..config import VisionConfig
+from ..env_setup import prepare as prepare_ultralytics_env
 
 
 class DetectorError(RuntimeError):
@@ -105,6 +106,7 @@ class Detector:
     # ---------- 能力探测 ----------
 
     def _has_ultralytics(self) -> bool:
+        prepare_ultralytics_env()
         try:
             import ultralytics  # noqa: F401
         except Exception as exc:  # 记录原因，便于界面上解释
@@ -154,6 +156,7 @@ class Detector:
         key = f"{self.config.weights}|{self.config.device}"
         if self._model is not None and self._model_key == key:
             return self._model
+        prepare_ultralytics_env()
         from ultralytics import YOLO  # 延迟导入，避免无依赖时启动失败
 
         self._model = YOLO(self.config.weights)

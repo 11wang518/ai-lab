@@ -27,7 +27,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.env_setup import prepare  # noqa: E402
 from app.server.multipart import parse_multipart  # noqa: E402
+
+prepare()  # 必须在 import ultralytics 之前
 
 MODEL = None
 CONF = 0.25
