@@ -13,8 +13,6 @@
 | [作业二：YOLO](作业二-YOLO.md) | 训练、实时推理、接入应用、局限说明 |
 | [工作日志](工作日志.md) | 每个阶段卡在哪、当时怎么判断的 |
 
----
-
 ## 快速开始
 
 前置条件：装好 [Ollama](https://ollama.com/download) 并拉取模型
@@ -43,8 +41,6 @@ python run_cli.py                 # 命令行对话
 python desktop\run_desktop.py     # 桌面窗口（用 Edge/Chrome 应用模式）
 ```
 
----
-
 ## 对应作业要求
 
 ### 一、大模型
@@ -63,8 +59,6 @@ python desktop\run_desktop.py     # 桌面窗口（用 Edge/Chrome 应用模式�
 | 1. 完成一次 ultralytics 训练 | 两轮：合成数据从零训练（mAP50 0.995）+ 真实 COCO8 微调（mAP50 0.872），均在 RTX 4060 上完成 |
 | 2. 实时推理部署 | `yolo/realtime.py` 实测 **49.5 FPS**（单帧 18.4 ms）；网页端也支持摄像头实时检测；另有独立推理服务 `yolo/serve.py` |
 | 3. 接入应用 | 应用加载**自己微调的模型**，真实街景照片上识别出车辆、电动车、行人 |
-
----
 
 ## 设计思路
 
@@ -121,8 +115,6 @@ Electron 需要 `npm install`（几百 MB）和构建步骤，在装不了依赖
 所以给了两条路：`desktop/run_desktop.py` 复用系统已有的 Edge/Chrome（零依赖，用于演示），
 `desktop/electron/` 负责后续产品化打包。
 
----
-
 ## 目录结构
 
 ```
@@ -141,8 +133,6 @@ ai-lab/
 ├─ run_cli.py             命令行入口
 └─ start-server.cmd       双击启动（Windows）
 ```
-
----
 
 ## 接口说明
 
@@ -180,8 +170,6 @@ ai-lab/
 }
 ```
 
----
-
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
@@ -197,8 +185,6 @@ ai-lab/
 | `AILAB_YOLO_DEVICE` | 空 | `0` / `cpu` |
 | `AILAB_YOLO_REMOTE_URL` | 空 | 远程推理服务地址 |
 | `AILAB_PORT` | `8000` | 服务端口 |
-
----
 
 ## 自测
 
@@ -217,8 +203,6 @@ python tools\check_gpu.py                                          # 显卡与 t
 python tools\bench_detect.py --frames 60                           # 检测接口往返耗时
 ```
 
----
-
 ## 常见问题
 
 **网页打不开？**
@@ -234,8 +218,6 @@ python tools\bench_detect.py --frames 60                           # 检测接�
 
 **训练报 CUDA out of memory？**
 按顺序试：`--batch 4` → `--imgsz 512` → 换 `yolo11n.pt`。
-
----
 
 ## 版本控制
 
