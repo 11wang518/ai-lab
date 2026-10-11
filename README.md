@@ -24,7 +24,7 @@
 | 4. 应用形式 | CLI（`run_cli.py`）、Web（`web/`）、桌面（`desktop/`，Edge 应用模式 + Electron 两种） |
 | 二 1. 完成一次 Ultralytics 训练 | **已跑通**：YOLO11n，100 epochs，RTX 4060 上 1.5 分钟，mAP50 **0.995**，详见 [YOLO 训练记录](docs/YOLO训练记录.md) |
 | 二 2. 实时推理部署 | `yolo/infer.py`（图片/目录/视频）、`yolo/realtime.py`（摄像头 + FPS）、`yolo/export.py`（导出 ONNX/TensorRT）、`yolo/serve.py`（独立推理服务） |
-| 二 3. 接入应用 | **已接通**：上传真实照片 → ultralytics 推理 → 前端 canvas 画框；示例照片上公交车与 4 名行人全部命中 |
+| 二 3. 接入应用 | **已接通**：上传真实照片 → ultralytics 推理 → 前端 canvas 画框；示例街景照片上 4 辆车、1 辆电动车、2 个行人共 7 个目标全部命中 |
 
 ---
 

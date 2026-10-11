@@ -226,19 +226,32 @@ python tools\start_background.py --provider ollama --model qwen2.5:1.5b ^
   "ok": true,
   "engine": "ultralytics",
   "model": "yolo11n.pt",
-  "width": 810, "height": 1080,
-  "elapsed_ms": 25.84,
+  "width": 720, "height": 1280,
+  "elapsed_ms": 22.58,
   "boxes": [
-    {"x1": 3.8, "y1": 229.36, "x2": 796.22, "y2": 728.41,
-     "score": 0.9403, "label": "bus", "cls": 5},
-    {"x1": 671.02, "y1": 394.81, "x2": 809.81, "y2": 878.72,
-     "score": 0.8882, "label": "person", "cls": 0}
+    {"x1": 167.02, "y1": 483.57, "x2": 275.23, "y2": 558.74,
+     "score": 0.8748, "label": "car", "cls": 2},
+    {"x1": 314.39, "y1": 532.92, "x2": 399.28, "y2": 678.17,
+     "score": 0.8203, "label": "motorcycle", "cls": 3}
   ]
 }
 ```
 
-实测：真实照片（一辆公交车 + 四名行人）上，模型给出 bus 0.94、
-person 0.89 / 0.88 / 0.86 / 0.62，全部正确，单张 25.8 ms。
+实测用的是一张真实街景照片（项目自带的 `web/samples/street.jpg`），
+模型识别出 **7 个目标**：
+
+| 目标 | 置信度 |
+| --- | --- |
+| car | 0.87 |
+| car | 0.86 |
+| motorcycle（电动车） | 0.82 |
+| car | 0.70 |
+| person（骑车的人） | 0.68 |
+| person（行人） | 0.56 |
+| car（远处） | 0.48 |
+
+单张 22.6 ms（GPU）。照片里的车辆、电动车和行人都被正确框出，
+说明换用 COCO 预训练权重之后，真实场景是能用的。
 
 ---
 
