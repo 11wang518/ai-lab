@@ -32,6 +32,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", default="qwen2.5:1.5b")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--vision-backend", default="auto", help="auto | ultralytics | remote | none")
+    parser.add_argument("--vision-weights", default="", help="YOLO 权重路径")
+    parser.add_argument("--vision-conf", type=float, default=None, help="置信度阈值")
     parser.add_argument("--timeout", type=float, default=25.0, help="等待启动的秒数")
     return parser.parse_args()
 
@@ -64,6 +67,12 @@ def main() -> int:
         args.model,
         "--no-fallback-port",
     ]
+    if args.vision_backend:
+        command += ["--vision-backend", args.vision_backend]
+    if args.vision_weights:
+        command += ["--vision-weights", args.vision_weights]
+    if args.vision_conf is not None:
+        command += ["--vision-conf", str(args.vision_conf)]
 
     creation_flags = 0
     if sys.platform == "win32":

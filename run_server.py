@@ -20,6 +20,8 @@ def main() -> int:
         "--vision-backend", help="auto | ultralytics | remote | none"
     )
     parser.add_argument("--vision-url", help="远程推理服务地址")
+    parser.add_argument("--vision-weights", help="YOLO 权重路径，例如 yolo11n.pt")
+    parser.add_argument("--vision-conf", type=float, help="置信度阈值，默认 0.25")
     parser.add_argument("--verbose", action="store_true", help="打印访问日志")
     parser.add_argument(
         "--no-fallback-port", action="store_true", help="端口被占用时直接报错"
@@ -44,6 +46,10 @@ def main() -> int:
         vision = replace(vision, backend=args.vision_backend)
     if args.vision_url:
         vision = replace(vision, remote_url=args.vision_url)
+    if args.vision_weights:
+        vision = replace(vision, weights=args.vision_weights)
+    if args.vision_conf is not None:
+        vision = replace(vision, conf=args.vision_conf)
 
     config = AppConfig(llm=llm, vision=vision, server=server_config)
 
