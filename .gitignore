@@ -16,5 +16,9 @@ datasets/
 # 临时截图
 _*.png
 
+# 测试视频与录制的推理结果
+*.mp4
+*.avi
+
 .idea/
 .vscode/
