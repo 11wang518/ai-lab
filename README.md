@@ -22,9 +22,9 @@
 | 2. 搭建智能体（Dify / n8n / 扣子等） | `app/agent/` 自带轻量智能体（意图识别 → 工具执行 → 交回模型），同时支持把 Dify / 扣子的 OpenAI 兼容地址当作模型后端接入 |
 | 3. 以 API 形式接入应用 | `app/server/http_app.py`：`POST /api/chat`（SSE 流式）、`POST /api/detect`，全部 HTTP + JSON |
 | 4. 应用形式 | CLI（`run_cli.py`）、Web（`web/`）、桌面（`desktop/`，Edge 应用模式 + Electron 两种） |
-| 二 1. 完成一次 Ultralytics 训练 | **已跑通**：YOLO11n，100 epochs，RTX 4060 上 1.5 分钟，mAP50 **0.995**，详见 [YOLO 训练记录](docs/YOLO训练记录.md) |
+| 二 1. 完成一次 Ultralytics 训练 | **已跑通两轮**：合成数据从零训练（mAP50 0.995）+ 真实 COCO8 微调（mAP50 0.872），均在 RTX 4060 上完成，详见 [YOLO 训练记录](docs/YOLO训练记录.md) |
 | 二 2. 实时推理部署 | `yolo/infer.py`（图片/目录/视频）、`yolo/realtime.py`（摄像头 + FPS）、`yolo/export.py`（导出 ONNX/TensorRT）、`yolo/serve.py`（独立推理服务） |
-| 二 3. 接入应用 | **已接通**：上传真实照片 → ultralytics 推理 → 前端 canvas 画框；示例街景照片上 4 辆车、1 辆电动车、2 个行人共 7 个目标全部命中 |
+| 二 3. 接入应用 | **已接通**：应用加载**自己微调的模型**，真实街景照片上识别出 3 辆车、1 辆电动车、2 个行人 |
 
 ---
 
@@ -145,19 +145,36 @@ python yolo\train.py --data datasets\synthetic\data.yaml --model yolo11n.yaml ^
   --epochs 100 --imgsz 320 --batch 8 --device 0      # 3. 训练（显卡）
 ```
 
-**关于真实图片**：自己训练的模型只认合成风格的车和人，拿真实照片去测效果很差。
-所以应用里的演示用的是 COCO 预训练权重 `yolo11n.pt`（能识别 80 个真实类别），
-自己训练的权重用于验证训练流程跑通。
+### 用真实数据微调（让自有模型也能认真实照片）
+
+合成数据训出来的模型在真实照片上不可用，所以又做了第二轮：**用真实数据微调**。
+数据是 COCO8（8 张真实照片 + 真实标注，YOLO 格式），用预训练权重作为起点。
+
+| 项目 | 结果 |
+| --- | --- |
+| 起点 | `yolo11n.pt` 预训练权重（499/499 层全部继承） |
+| 数据 | COCO8，4 训练 / 4 验证，真实照片 |
+| 训练 | 50 轮（第 19 轮最佳后早停），imgsz 640，GPU，**约 25 秒** |
+| 验证集 | mAP50 **0.872**，mAP50-95 **0.645** |
+| 真实街景照片 | 识别出 car 0.79 / car 0.78 / motorcycle 0.77 / person 0.60 等 6 个目标 |
 
 ```powershell
-# 预训练权重从 HuggingFace 镜像下载（GitHub 在这台机器上不通）
-curl -L -o yolo11n.pt https://hf-mirror.com/Ultralytics/YOLO11/resolve/main/yolo11n.pt
+python tools\fetch_coco8.py                   # 从 HuggingFace 镜像取真实数据集
+python yolo\train.py --data datasets\coco8\data.yaml --model yolo11n.pt ^
+  --epochs 50 --imgsz 640 --batch 8 --device 0      # 微调
+```
 
+### 应用默认加载的是自己训练的模型
+
+```powershell
 python tools\start_background.py --provider ollama --model qwen2.5:1.5b ^
-  --vision-backend ultralytics --vision-weights yolo11n.pt --vision-conf 0.45
+  --vision-backend ultralytics ^
+  --vision-weights runs\train\coco8-ft\weights\best.pt --vision-conf 0.45
 ```
 
 效果见 [docs/images/screenshot-yolo-real.png](docs/images/screenshot-yolo-real.png)。
+三个权重的分工：`coco8-ft`（真实数据微调，应用默认）、`yolo11n.pt`（预训练起点）、
+`synthetic-gpu`（合成数据从零训练，只用于验证训练流程）。
 
 ### 1. 装依赖
 

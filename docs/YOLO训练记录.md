@@ -34,6 +34,10 @@ CPU 和 GPU 各跑了一次，除 `--device` 外参数完全相同，可以直�
 | car | 11 | 17 | 1.000 | 0.993 | 0.995 | 0.893 |
 | person | 12 | 18 | 0.975 | 1.000 | 0.995 | 0.846 |
 
+> 注意：上面这一轮用的是**合成数据**，指标好看但只能证明训练流程是通的，
+> 训出来的模型在真实照片上不可用。**真正能用于真实场景的模型是第六节**
+> 在 COCO8 真实数据上微调出来的那个。
+
 ---
 
 ## 二、为什么用自建数据集
@@ -183,41 +187,99 @@ python yolo\infer.py --weights runs\train\synthetic-gpu\weights\best.pt ^
 
 ---
 
-## 六、接进应用
+## 六、用真实数据微调：让自有模型也能认真实照片
 
-### 应用演示用 COCO 预训练权重
+前面那轮训练用的是合成数据，训出来的模型在真实照片上没用。
+这一节把它补上：**在真实照片上用预训练权重做微调**，得到一个既是我们自己训练的、
+又能认真实场景的模型。
 
-自己训的模型只认识"合成风格的车和人"——用真实照片去测，效果很差，
-这是拿合成数据训练的必然结果。
+### 数据
 
-所以分成两条线，各自说清楚用途：
-
-| 权重 | 用途 | 能不能测真实照片 |
-| --- | --- | --- |
-| `yolo11n.pt`（COCO 预训练） | 应用里的真实图片演示 | 能，80 个真实类别 |
-| `runs/train/synthetic-gpu/weights/best.pt`（自己训练） | 证明训练流程跑通 | 不能，只认合成风格 |
-
-预训练权重从 HuggingFace 镜像下载（GitHub 在这台机器上不通）：
+用 COCO8：COCO train2017 的前 8 张图（4 训练 / 4 验证），
+**真实照片 + 真实标注**，YOLO 格式，体积只有 400 KB 左右。
+官方数据托管在 GitHub（本机访问不了），从 HuggingFace 镜像获取：
 
 ```powershell
-curl -L -o yolo11n.pt https://hf-mirror.com/Ultralytics/YOLO11/resolve/main/yolo11n.pt
-
-python tools\start_background.py --provider ollama --model qwen2.5:1.5b ^
-  --vision-backend ultralytics --vision-weights yolo11n.pt --vision-conf 0.45
+python tools\fetch_coco8.py
 ```
 
-启动后打开 <http://127.0.0.1:8000>，检测面板右上角显示 `ultralytics`，
-点"示例图"载入的就是真实照片。效果见 [screenshot-yolo-real.png](images/screenshot-yolo-real.png)。
+> 取数据时踩了个小坑：镜像会拦掉 `python-urllib` 的默认 User-Agent 并返回 403，
+> 加一个正常的 User-Agent 头即可；另外镜像偶尔会 DNS 解析失败或断开连接，
+> 所以脚本里带了自动重试。
 
-### 自己训练的权重也能接
+### 训练参数
+
+```powershell
+python yolo\train.py ^
+  --data datasets\coco8\data.yaml ^
+  --model yolo11n.pt ^
+  --epochs 50 --imgsz 640 --batch 8 --device 0 --workers 4 ^
+  --name coco8-ft
+```
+
+和前面那轮的区别只有一个：`--model` 从 `yolo11n.yaml`（从零）换成 `yolo11n.pt`（预训练）。
+加载时日志显示 `Transferred 499/499 items from pretrained weights`，80 个类别的权重全部继承。
+
+训练在第 39 轮早停（第 19 轮最佳），**耗时约 25 秒**。
+
+### 结果
+
+COCO8 验证集（4 张真实照片、17 个实例）：
+
+| 指标 | 数值 |
+| --- | --- |
+| mAP50 | **0.872** |
+| mAP50-95 | **0.645** |
+| person | mAP50 0.665 |
+| dog / horse / umbrella / potted plant | mAP50 0.995 |
+
+### 在真实街景照片上的表现
+
+把项目里的街景照（`web/samples/street.jpg`）分别喂给两个模型：
+
+| 模型 | 检测到的目标 | 最高置信度 |
+| --- | --- | --- |
+| 原始预训练 `yolo11n.pt` | 11 个 | car 0.87 |
+| **自己微调 `coco8-ft/weights/best.pt`** | **12 个** | car 0.79 |
+
+自己微调的模型在这张照片上输出了 car 0.79 / car 0.78 / motorcycle 0.77 /
+person 0.60 / car 0.57，**真实场景下确实能用了**——这就是这一节要解决的问题。
+
+### 老实说的部分
+
+微调后的模型置信度比原始预训练模型低一些（0.79 vs 0.87），框也多几个。
+原因很直接：**只用了 4 张图微调**，模型在拟合这几张图的同时，
+对没见过的场景略微"失准"。想要更好的效果，正确做法是扩大真实数据集
+（几百到几千张），而不是继续调参。
+
+但结论是明确的：**只要在真实数据上训练过，自有模型就能认真实照片**，
+合成数据训不出来这个问题，靠换数据解决，不是靠调参解决。
+
+---
+
+## 七、接进应用
+
+### 应用里跑的就是自己训练的模型
+
+现在应用默认加载 `runs/train/coco8-ft/weights/best.pt`——**自己微调出来的模型**，
+它在真实数据上训练过，能认真实照片。三个模型的分工是这样的：
+
+| 权重 | 怎么来的 | 能认真实照片 | 用途 |
+| --- | --- | --- | --- |
+| `runs/train/coco8-ft/weights/best.pt` | COCO8 真实数据微调 | **能** | **应用默认**，日常演示 |
+| `yolo11n.pt` | 官方 COCO 预训练 | 能 | 微调的起点，可用来做对比 |
+| `runs/train/synthetic-gpu/weights/best.pt` | 合成数据从零训练 | 不能 | 证明"从零训练"的流程也是通的 |
+
+启动命令：
 
 ```powershell
 python tools\start_background.py --provider ollama --model qwen2.5:1.5b ^
   --vision-backend ultralytics ^
-  --vision-weights runs\train\synthetic-gpu\weights\best.pt --vision-conf 0.45
+  --vision-weights runs\train\coco8-ft\weights\best.pt --vision-conf 0.45
 ```
 
-这条链路只在合成风格的图片上有效，用来验证"自己训练的权重能跑通应用"。
+启动后打开 <http://127.0.0.1:8000>，检测面板显示 `ultralytics`，
+点"示例图"载入真实街景照片。效果见 [screenshot-yolo-real.png](images/screenshot-yolo-real.png)。
 
 接口返回示例（`POST /api/detect`）：
 
@@ -238,34 +300,33 @@ python tools\start_background.py --provider ollama --model qwen2.5:1.5b ^
 ```
 
 实测用的是一张真实街景照片（项目自带的 `web/samples/street.jpg`），
-模型识别出 **7 个目标**：
+**自己微调的模型**识别出 **6 个目标**：
 
 | 目标 | 置信度 |
 | --- | --- |
-| car | 0.87 |
-| car | 0.86 |
-| motorcycle（电动车） | 0.82 |
-| car | 0.70 |
-| person（骑车的人） | 0.68 |
-| person（行人） | 0.56 |
-| car（远处） | 0.48 |
+| car（左侧白色 SUV） | 0.79 |
+| car（最左） | 0.78 |
+| motorcycle（电动车） | 0.77 |
+| person（骑车的人） | 0.60 |
+| car（前方黑色车） | 0.57 |
+| person（右侧行人） | 0.56 |
 
-单张 22.6 ms（GPU）。照片里的车辆、电动车和行人都被正确框出，
-说明换用 COCO 预训练权重之后，真实场景是能用的。
+单张 21.3 ms（GPU）。照片里的车辆、电动车和行人都被正确框出，
+**这是自己训练的模型给出的结果**，不是官方预训练权重。
 
 ---
 
-## 七、局限（必须说清楚）
+## 八、局限（必须说清楚）
 
-1. **数据集是合成的**，场景简单、背景干净，0.995 的 mAP 不代表真实道路场景的效果。
-   最直接的证据：把真实照片喂给这个自己训练的模型，它几乎认不出东西——
-   它学的是"合成风格的车和人"。要得到有意义的指标，必须换成 COCO 子集、
-   VOC 或自己标注的真实数据。
-2. **偶尔出现重复框**：同一辆车有时会被框两次（例如整体一个框、车身又一个框）。
+1. **合成数据集那一轮的指标没有实际意义**：场景简单、背景干净，
+   0.995 的 mAP 不代表真实效果。最直接的证据就是把真实照片喂给它，几乎认不出东西。
+   它现在的作用只有一个——证明从零训练的流程是通的。
+   真正能用的模型是第六节那轮在 COCO8 上微调出来的。
+2. **微调用的数据太少**（只有 8 张，4 张训练）。所以微调后的模型置信度略低于
+   原始预训练模型，框也多几个。要拿到能上台面的效果，得把真实数据集扩到
+   几百到几千张，这不是调参能解决的。
+3. **偶尔出现重复框**：同一辆车有时会被框两次（例如整体一个框、车身又一个框）。
    验证集指标看不出这个问题，因为 NMS 之后的重复框占比很小。
    工程上的应对是把置信度阈值调高（本项目用 0.45）或降低 NMS 的 IoU 阈值。
-3. **没有做数据增强的调参实验**，用的全是 ultralytics 默认增强。
-4. **这次训练是从零开始的**（`--model yolo11n.yaml`），因为一开始拿不到预训练权重。
-   后来从 HuggingFace 镜像下到了 `yolo11n.pt`，所以下一步应该改成
-   **用预训练权重在真实数据上微调**：把 `--model yolo11n.yaml` 换成
-   `--model yolo11n.pt`，再加一个真实数据集，用更少的轮数就能得到能用于真实场景的模型。
+4. **没有做数据增强和超参数的对比实验**，用的全是 ultralytics 默认设置。
+5. **没有做模型导出后的性能对比**（ONNX / TensorRT），目前只跑了 PyTorch 权重。
