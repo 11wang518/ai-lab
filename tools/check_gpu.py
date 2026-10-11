@@ -1,0 +1,75 @@
+#!/usr/bin/env python
+"""检查 YOLO 训练/推理所需的显卡环境是否就绪。
+
+跑训练之前先跑这个，能提前发现"装成了 CPU 版 torch"这类问题。
+
+用法：
+    python tools/check_gpu.py
+"""
+
+from __future__ import annotations
+
+import platform
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from app.env_setup import prepare  # noqa: E402
+
+prepare()  # 必须在 import ultralytics 之前
+
+
+def main() -> int:
+    print("=" * 60)
+    print("YOLO 运行环境检查")
+    print("=" * 60)
+    print(f"Python      : {sys.version.split()[0]} ({platform.machine()})")
+    print(f"操作系统    : {platform.system()} {platform.release()}")
+
+    try:
+        import torch
+    except ImportError:
+        print("\n[失败] 没有安装 torch。先执行：pip install ultralytics")
+        return 1
+
+    print(f"PyTorch     : {torch.__version__}")
+    print(f"CUDA 编译版 : {torch.version.cuda or '无（CPU 版）'}")
+    available = torch.cuda.is_available()
+    print(f"显卡可用    : {available}")
+
+    if available:
+        for index in range(torch.cuda.device_count()):
+            props = torch.cuda.get_device_properties(index)
+            print(
+                f"  显卡 {index}     : {props.name}"
+                f"（显存 {props.total_memory / 1024**3:.1f} GB，"
+                f"算力 {props.major}.{props.minor}）"
+            )
+
+    try:
+        import ultralytics
+
+        print(f"ultralytics : {ultralytics.__version__}")
+    except ImportError:
+        print("ultralytics : 未安装（pip install ultralytics）")
+        return 1
+
+    print()
+    if available:
+        print("[通过] 可以用显卡训练。训练时加 --device 0。")
+        return 0
+
+    print("[警告] torch 是 CPU 版，训练会慢很多。")
+    print("       要用显卡，按下面步骤换成 CUDA 版：")
+    print("       1. 先卸载：pip uninstall -y torch torchvision")
+    print("       2. 再安装（CUDA 12.4 示例，按官网选对应版本）：")
+    print("          pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124")
+    print("       官网选择器：https://pytorch.org/get-started/locally/")
+    print("\n       小数据集（比如 coco8）用 CPU 也能跑通，只是慢一点。")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
