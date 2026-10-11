@@ -26,6 +26,9 @@ const els = {
   detect: $("detect"),
   sample: $("sample"),
   clearImage: $("clear-image"),
+  camera: $("camera"),
+  stopCamera: $("stop-camera"),
+  video: $("video"),
   visionStatus: $("vision-status"),
   detList: $("det-list"),
   detCount: $("det-count"),
@@ -322,6 +325,7 @@ function loadImage(blob, name) {
 }
 
 async function acceptFile(blob, name) {
+  stopCamera(true);
   try {
     const img = await loadImage(blob, name);
     state.image = { img, blob, name, width: img.naturalWidth, height: img.naturalHeight };
@@ -336,9 +340,7 @@ async function acceptFile(blob, name) {
   }
 }
 
-function draw() {
-  if (!state.image) return;
-  const { img, width, height } = state.image;
+function layoutCanvas(width, height) {
   const maxWidth = Math.max(220, els.canvasWrap.clientWidth || 400);
   const scale = Math.min(maxWidth / width, MAX_STAGE_HEIGHT / height);
   const cssWidth = Math.round(width * scale);
@@ -350,10 +352,11 @@ function draw() {
   els.stage.width = Math.round(cssWidth * dpr);
   els.stage.height = Math.round(cssHeight * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, cssWidth, cssHeight);
-  ctx.drawImage(img, 0, 0, cssWidth, cssHeight);
   state.fitScale = scale;
+  return { cssWidth, cssHeight, scale };
+}
 
+function paintBoxes(scale) {
   state.boxes.forEach((box, index) => {
     const color = BOX_COLORS[index % BOX_COLORS.length];
     const x = box.x1 * scale;
@@ -372,6 +375,20 @@ function draw() {
     ctx.fillStyle = "#ffffff";
     ctx.fillText(label, x + 6, labelY + 13);
   });
+}
+
+/** 把任意画面（图片或视频帧）画到画布上，再叠加检测框。 */
+function drawSource(source, width, height) {
+  if (!width || !height) return;
+  const { cssWidth, cssHeight, scale } = layoutCanvas(width, height);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+  ctx.drawImage(source, 0, 0, cssWidth, cssHeight);
+  paintBoxes(scale);
+}
+
+function draw() {
+  if (!state.image) return;
+  drawSource(state.image.img, state.image.width, state.image.height);
 }
 
 function renderResults(boxes, engine) {
@@ -596,6 +613,148 @@ function suppressOverlaps(boxes, threshold) {
   return kept;
 }
 
+/* ---------------- 摄像头实时检测 ---------------- */
+
+const CAPTURE_MAX = 640; // 上传前把画面缩到最长边 640，减少传输和推理开销
+
+const camera = {
+  stream: null,
+  running: false,
+  busy: false,
+  frames: 0,
+  windowStarted: 0,
+  fps: 0,
+  frameSize: null,
+};
+
+function cameraSupported() {
+  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+
+async function startCamera() {
+  if (camera.running) return;
+  if (!cameraSupported()) {
+    setStatus("当前浏览器不支持摄像头（需要 https 或 localhost 环境）", "error");
+    return;
+  }
+  setStatus("正在请求摄像头权限…");
+  try {
+    camera.stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false,
+    });
+  } catch (error) {
+    setStatus(`无法打开摄像头：${error.message}`, "error");
+    return;
+  }
+
+  els.video.srcObject = camera.stream;
+  try {
+    await els.video.play();
+  } catch (error) {
+    setStatus(`摄像头启动失败：${error.message}`, "error");
+    return;
+  }
+
+  camera.running = true;
+  camera.busy = false;
+  camera.frames = 0;
+  camera.fps = 0;
+  camera.windowStarted = performance.now();
+  camera.frameSize = null;
+
+  state.image = null;
+  state.boxes = [];
+  renderResults([]);
+  els.dropzone.hidden = true;
+  els.canvasWrap.hidden = false;
+  els.camera.hidden = true;
+  els.stopCamera.hidden = false;
+  setBadge("实时", "ok");
+  setStatus("正在启动实时检测…");
+  requestAnimationFrame(cameraLoop);
+}
+
+function stopCamera(quiet) {
+  if (!camera.running && !camera.stream) return;
+  camera.running = false;
+  camera.busy = false;
+  if (camera.stream) {
+    camera.stream.getTracks().forEach((track) => track.stop());
+    camera.stream = null;
+  }
+  els.video.srcObject = null;
+  els.camera.hidden = false;
+  els.stopCamera.hidden = true;
+  state.boxes = [];
+  renderResults([]);
+  const backend = state.config && state.config.vision && state.config.vision.active_backend;
+  setBadge(backend && backend !== "none" ? backend : "未加载", backend && backend !== "none" ? "ok" : "warn");
+  if (!quiet) setStatus("摄像头已停止");
+}
+
+function cameraLoop() {
+  if (!camera.running) return;
+  const video = els.video;
+  if (video.videoWidth) {
+    const size = camera.frameSize || { width: video.videoWidth, height: video.videoHeight };
+    drawSource(video, size.width, size.height);
+    if (!camera.busy) {
+      camera.busy = true;
+      detectFrame(video).finally(() => {
+        camera.busy = false;
+      });
+    }
+  }
+  requestAnimationFrame(cameraLoop);
+}
+
+async function captureFrame(video) {
+  const scale = Math.min(1, CAPTURE_MAX / Math.max(video.videoWidth, video.videoHeight));
+  const width = Math.max(1, Math.round(video.videoWidth * scale));
+  const height = Math.max(1, Math.round(video.videoHeight * scale));
+  const scratch = document.createElement("canvas");
+  scratch.width = width;
+  scratch.height = height;
+  scratch.getContext("2d").drawImage(video, 0, 0, width, height);
+  const blob = await new Promise((resolve) => scratch.toBlob(resolve, "image/jpeg", 0.7));
+  return { blob, width, height };
+}
+
+async function detectFrame(video) {
+  let frame;
+  try {
+    frame = await captureFrame(video);
+  } catch {
+    return;
+  }
+  if (!frame.blob || !camera.running) return;
+
+  const form = new FormData();
+  form.append("file", frame.blob, "frame.jpg");
+  try {
+    const response = await fetch("/api/detect", { method: "POST", body: form });
+    const data = await response.json();
+    if (!camera.running || !data.ok) return;
+    camera.frameSize = { width: data.width || frame.width, height: data.height || frame.height };
+    state.boxes = data.boxes || [];
+
+    camera.frames += 1;
+    const elapsed = performance.now() - camera.windowStarted;
+    if (elapsed >= 1000) {
+      camera.fps = (camera.frames * 1000) / elapsed;
+      camera.frames = 0;
+      camera.windowStarted = performance.now();
+      renderResults(state.boxes, "实时");
+    }
+    setStatus(
+      `实时检测中 · ${camera.fps.toFixed(1)} FPS · ${state.boxes.length} 个目标 · 单帧 ${data.elapsed_ms} ms`
+    );
+  } catch {
+    // 单帧失败不影响后续帧
+  }
+}
+
 /* ---------------- 初始化 ---------------- */
 
 async function loadConfig() {
@@ -662,6 +821,7 @@ async function useSample() {
 }
 
 function clearImage() {
+  stopCamera(true);
   state.image = null;
   state.boxes = [];
   els.canvasWrap.hidden = true;
@@ -705,6 +865,8 @@ function wireEvents() {
   els.detect.addEventListener("click", detect);
   els.sample.addEventListener("click", useSample);
   els.clearImage.addEventListener("click", clearImage);
+  els.camera.addEventListener("click", startCamera);
+  els.stopCamera.addEventListener("click", () => stopCamera(false));
 
   els.dropzone.addEventListener("click", () => els.file.click());
   els.dropzone.addEventListener("keydown", (event) => {
@@ -753,14 +915,21 @@ async function init() {
     setPill(els.llmPill, els.llmDot, "后端未响应", "err");
   }
 
-  // 自动演示模式：/ ?demo=1，用于快速截图或验收时一键跑完整链路
-  if (new URLSearchParams(location.search).get("demo") === "1") {
+  const params = new URLSearchParams(location.search);
+
+  // 自动演示模式：?demo=1，一键跑完整链路（载入示例图 + 检测 + 发一条消息）
+  if (params.get("demo") === "1") {
     await useSample();
     if (state.image) await detect();
     if (state.messages.length === 0) {
       els.prompt.value = "帮我算一下 12*(3+4)";
       await sendMessage();
     }
+  }
+
+  // 摄像头模式：?camera=1，打开页面就直接进入实时检测
+  if (params.get("camera") === "1") {
+    await startCamera();
   }
 }
 
