@@ -20,7 +20,8 @@ sys.path.insert(0, str(ROOT))
 from app.config import AppConfig  # noqa: E402
 from app.server.http_app import create_server, find_free_port, serve_in_background  # noqa: E402
 
-SAMPLE = ROOT / "web" / "samples" / "demo-street.png"
+# 用真实照片做示例，和界面上"示例图"按钮保持一致
+SAMPLE = ROOT / "web" / "samples" / "bus.jpg"
 
 PASSED: list[str] = []
 FAILED: list[str] = []
@@ -180,7 +181,7 @@ def main() -> int:
             check("示例图片存在", False, str(SAMPLE))
         else:
             status, body = post_image(
-                f"{base}/api/detect", SAMPLE.read_bytes(), "demo-street.png"
+                f"{base}/api/detect", SAMPLE.read_bytes(), SAMPLE.name
             )
             payload = json.loads(body)
             check("POST /api/detect 返回 200", status == 200, f"HTTP {status}")

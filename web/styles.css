@@ -312,7 +312,7 @@ body {
   overflow: hidden;
   background: var(--surface-2);
 }
-#stage { display: block; width: 100%; height: auto; }
+#stage { display: block; width: 100%; height: auto; margin: 0 auto; }
 
 .vision-actions {
   display: flex;
