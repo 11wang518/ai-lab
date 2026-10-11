@@ -62,11 +62,20 @@ def main() -> int:
         return 0
 
     print("[警告] torch 是 CPU 版，训练会慢很多。")
-    print("       要用显卡，按下面步骤换成 CUDA 版：")
-    print("       1. 先卸载：pip uninstall -y torch torchvision")
-    print("       2. 再安装（CUDA 12.4 示例，按官网选对应版本）：")
-    print("          pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124")
-    print("       官网选择器：https://pytorch.org/get-started/locally/")
+    print("       要用显卡，按下面步骤换成 CUDA 版（本机实测可行的路径）：")
+    print("       1. 先用多线程工具把 wheel 拉到本地（单连接会被限速到 0.9 MB/s）：")
+    print("          python tools\\fast_download.py \\")
+    print("            http://mirrors.aliyun.com/pytorch-wheels/cu126/"
+          "torch-2.14.1+cu126-cp313-cp313-win_amd64.whl \\")
+    print("            %TEMP%\\pwheels\\torch-2.14.1+cu126-cp313-cp313-win_amd64.whl --threads 6")
+    print("       2. 校验并安装（文件名必须符合 wheel 规范，不能随便改名）：")
+    print("          python -m zipfile -t %TEMP%\\pwheels\\torch-2.14.1+cu126-cp313-cp313-win_amd64.whl")
+    print("          pip uninstall -y torch torchvision")
+    print("          pip install %TEMP%\\pwheels\\torch-2.14.1+cu126-cp313-cp313-win_amd64.whl")
+    print("          pip install torchvision==0.29.1+cu126 --no-index \\")
+    print("            -f http://mirrors.aliyun.com/pytorch-wheels/cu126/ --trusted-host mirrors.aliyun.com")
+    print("       说明：清华镜像在本机解析不了，官方源速度只有 0.65 MB/s；")
+    print("             阿里云镜像可用，魔搭社区能连但没有现成的 torch wheel。")
     print("\n       小数据集（比如 coco8）用 CPU 也能跑通，只是慢一点。")
     return 0
 
