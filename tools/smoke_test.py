@@ -101,6 +101,9 @@ def main() -> int:
     print("=" * 60)
 
     config = AppConfig.from_env()
+    # 第一段测试固定用 none 后端：这条分支在任何机器上都必须返回同样的结果，
+    # 不受"有没有装 ultralytics、有没有下载权重"影响。
+    config.vision.backend = "none"
     port = find_free_port(config.server.host, 8321)
     config.server.port = port
     server = create_server(config)
@@ -201,6 +204,53 @@ def main() -> int:
         check("未知后端返回 400", status == 400, f"HTTP {status}")
         status, body = post_image(f"{base}/api/detect", b"", "empty.png")
         check("空图片返回 400", status == 400, f"HTTP {status}")
+
+        print("\n6. 真实 YOLO 推理（有训练权重时才跑）")
+        weights = (
+            ROOT / "runs" / "train" / "synthetic-cpu" / "weights" / "best.pt"
+        )
+        sample_image = ROOT / "datasets" / "synthetic" / "images" / "val" / "val_0000.png"
+        if not weights.exists():
+            print(f"  [跳过] 没有找到训练权重：{weights}")
+        elif not sample_image.exists():
+            print(f"  [跳过] 没有找到验证图片：{sample_image}")
+        else:
+            real_config = AppConfig.from_env()
+            real_config.vision.backend = "ultralytics"
+            real_config.vision.weights = str(weights)
+            real_config.vision.conf = 0.25
+            real_config.server.port = find_free_port(config.server.host, 8361)
+            real_server = create_server(real_config)
+            serve_in_background(real_server)
+            real_base = f"http://{real_config.server.host}:{real_config.server.port}"
+            time.sleep(0.3)
+            try:
+                status, body = post_image(
+                    f"{real_base}/api/detect", sample_image.read_bytes(), sample_image.name
+                )
+                payload = json.loads(body)
+                check(
+                    "真实推理返回 200",
+                    status == 200,
+                    f"HTTP {status}",
+                )
+                check(
+                    "使用 ultralytics 引擎",
+                    payload.get("engine") == "ultralytics",
+                    str(payload.get("engine")),
+                )
+                boxes = payload.get("boxes", [])
+                check("至少检出一个目标", len(boxes) >= 1, f"{len(boxes)} 个")
+                if boxes:
+                    labels = {box["label"] for box in boxes}
+                    check(
+                        "识别出 car / person",
+                        labels & {"car", "person"} != set(),
+                        "、".join(sorted(labels)),
+                    )
+            finally:
+                real_server.shutdown()
+                real_server.server_close()
 
     finally:
         server.shutdown()
