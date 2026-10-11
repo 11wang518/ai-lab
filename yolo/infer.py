@@ -15,6 +15,14 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from app.env_setup import prepare  # noqa: E402
+
+prepare()  # 必须在 import ultralytics 之前
+
+ROOT = Path(__file__).resolve().parents[1]
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="YOLO 推理")
@@ -63,6 +71,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     model = YOLO(args.weights)
+    # 相对路径会被 ultralytics 解析到 runs/detect/ 下面，这里统一转成绝对路径
+    project_dir = Path(args.project)
+    if not project_dir.is_absolute():
+        project_dir = ROOT / project_dir
+
     collected: list[dict] = []
     results = model.predict(
         source=args.source,
@@ -73,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
         save=not args.no_save,
         save_txt=args.save_txt,
         show=args.show,
-        project=args.project,
+        project=str(project_dir),
         name=args.name,
         stream=True,
         verbose=False,
@@ -93,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(collected, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         print(f"结果已写入 {args.json_path}")
-    print(f"标注结果保存在 {Path(args.project) / args.name}")
+    print(f"标注结果保存在 {project_dir / args.name}")
     return 0
 
 
